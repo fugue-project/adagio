@@ -9,6 +9,9 @@ jobs:
     steps:
       - checkout
       - run:
+          command: pip install pre-commit
+          name: Install pre-commit
+      - run:
           command: pre-commit run --all-files
           name: Format Check
 
