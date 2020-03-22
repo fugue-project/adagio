@@ -1,1 +1,10 @@
-.[test]
+.
+# test requirements
+pre-commit
+mypy
+flake8
+autopep8
+pylint
+pytest
+pytest-cov
+pytest-mock

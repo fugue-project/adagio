@@ -11,14 +11,6 @@ setup(
         'pandas'
     ],
     extras_require={
-        "test": [
-            'mypy',
-            'flake8',
-            'autopep8',
-            'pylint',
-            'pytest',
-            'pytest-cov',
-            'pytest-mock'
-        ]
+        
     }
 )
