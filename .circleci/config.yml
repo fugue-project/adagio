@@ -15,7 +15,6 @@ jobs:
           command: python -bb -m pytest tests/
           name: Test
 
-
 workflows:
   main:
     jobs:
