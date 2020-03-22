@@ -4,7 +4,15 @@ orbs:
   python: circleci/python@0.2.1
 
 jobs:
-  build-and-test:
+  precommit:
+    executor: python/default
+    steps:
+      - checkout
+      - run:
+          command: pre-commit run --all-files
+          name: Format Check
+
+  test:
     executor: python/default
     steps:
       - checkout
@@ -18,4 +26,5 @@ jobs:
 workflows:
   main:
     jobs:
-      - build-and-test
+      - precommit
+      - test

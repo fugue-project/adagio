@@ -21,10 +21,10 @@ repos:
             additional_dependencies:
             - flake8-bugbear
             - flake8-builtins
+            - flake8-docstrings
+            - flake8-rst-docstrings
             - flake8-comprehensions
-            - flake8-per-file-ignores
             - flake8-tidy-imports
-            - flake8
             - pycodestyle
     - repo: https://github.com/pre-commit/mirrors-mypy
       rev: v0.770
