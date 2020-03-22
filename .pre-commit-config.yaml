@@ -21,7 +21,7 @@ repos:
             additional_dependencies:
             - flake8-bugbear
             - flake8-builtins
-            # - flake8-docstrings  # TODO: add back
+            # - flake8-docstrings  # TODO: add back!
             # - flake8-rst-docstrings
             - flake8-comprehensions
             - flake8-tidy-imports
