@@ -13,7 +13,7 @@ jobs:
           name: Install pre-commit
       - run:
           command: pre-commit run --all-files
-          name: Format Check
+          name: format checks
 
   test:
     executor: python/default
@@ -24,7 +24,7 @@ jobs:
       - python/save-cache
       - run:
           command: python -bb -m pytest tests/
-          name: Test
+          name: unit tests
 
   deploy:
     executor: python/default
