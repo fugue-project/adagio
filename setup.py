@@ -2,11 +2,16 @@ from setuptools import setup, find_packages
 
 VERSION = "0.0.2"
 
+with open("README.md") as f:
+    LONG_DESCRIPTION = f.read()
+
 setup(
     name="adagio",
     version=VERSION,
     packages=find_packages(),
     description="A Dag IO Framework",
+    long_description=LONG_DESCRIPTION,
+    long_description_content_type="text/markdown",  # This is important!
     author="Han Wang",
     author_email="goodwanghan@gmail.com",
     install_requires=["pandas"],
