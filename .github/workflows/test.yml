@@ -17,7 +17,6 @@ jobs:
       matrix:
         python-version: [3.6, 3.8]
 
-
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -26,7 +25,5 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: make devenv
-    - name: Lint
-      run: make lint
     - name: Test
       run: make test
