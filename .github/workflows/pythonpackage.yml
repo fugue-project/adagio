@@ -28,5 +28,5 @@ jobs:
       run: make devenv
     - name: Lint
       run: make lint
-    - name: Test with pytest
+    - name: Test
       run: make test
