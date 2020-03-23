@@ -19,6 +19,9 @@ dev:
 docs:
 	$(MAKE) -C docs html
 
+lint:
+	pre-commit run --all-files
+
 package:
 	rm -rf dist/*
 	python3 setup.py sdist
