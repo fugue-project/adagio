@@ -1,4 +1,5 @@
 .
+
 # test requirements
 pre-commit
 mypy
@@ -8,3 +9,7 @@ pylint
 pytest
 pytest-cov
 pytest-mock
+
+# publish to pypi
+wheel
+twine
