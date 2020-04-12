@@ -1,13 +1,14 @@
 import json
 from threading import Event
 from traceback import StackSummary, extract_stack
-from typing import Any, Callable, Generic, Optional, Tuple, Type, TypeVar
+from typing import Any, Dict, List, Optional, Type, TypeVar
 
 from triad.collections.dict import IndexedOrderedDict, ParamDict
-from triad.utils.convert import to_timedelta, to_type
+from triad.utils.assertion import assert_or_throw
+from triad.utils.convert import (get_full_type_path, to_function, to_timedelta,
+                                 to_type)
 from triad.utils.hash import to_uuid
 from triad.utils.string import assert_triad_var_name
-from triad.utils.assertion import assert_or_throw
 
 
 class OutputSpec(object):
@@ -17,23 +18,27 @@ class OutputSpec(object):
         self.nullable = nullable
         self.metadata = ParamDict(metadata, deep=True)
 
-    @property
-    def id(self) -> str:
-        return to_uuid(self._tuple)
+    def __uuid__(self) -> str:
+        return to_uuid([self.__dict__[x] for x in self.attributes])
 
     def __repr__(self) -> str:
-        return str(self._tuple)
+        return self.name
 
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
-            assert isinstance(obj, self.data_type), f"{obj} mismatches type {self}"
+            assert isinstance(
+                obj, self.data_type), f"{obj} mismatches type {self.paramdict}"
             return obj
         assert self.nullable, f"Can't set None to {self}"
         return obj
 
     @property
-    def _tuple(self) -> Tuple:
-        return (self.name, self.data_type, self.nullable)
+    def attributes(self) -> List[str]:
+        return ["name", "data_type", "nullable", "metadata"]
+
+    @property
+    def paramdict(self) -> ParamDict:
+        return ParamDict((x, self.__dict__[x]) for x in self.attributes)
 
 
 class ConfigSpec(OutputSpec):
@@ -61,7 +66,7 @@ class ConfigSpec(OutputSpec):
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
             return super().validate_value(obj)
-        assert self.nullable, f"Can't set None to {self}"
+        assert self.nullable, f"Can't set None to {self.paramdict}"
         return obj
 
     def validate_spec(self, spec: OutputSpec) -> OutputSpec:
@@ -73,14 +78,9 @@ class ConfigSpec(OutputSpec):
         return spec
 
     @property
-    def _tuple(self) -> Tuple:
-        return (
-            self.name,
-            self.data_type,
-            self.nullable,
-            self.required,
-            self.default_value,
-        )
+    def attributes(self) -> List[str]:
+        return ["name", "data_type", "nullable",
+                "required", "default_value", "metadata"]
 
 
 class InputSpec(ConfigSpec):
@@ -96,62 +96,72 @@ class InputSpec(ConfigSpec):
         metadata: Any = None,
     ):
         super().__init__(name, data_type, nullable, required, default_value, metadata)
-        self.timeout_sec = to_timedelta(timeout).total_seconds()
+        self.timeout = to_timedelta(timeout).total_seconds()
         self.default_on_timeout = default_on_timeout
-        assert self.timeout_sec >= 0, "timeout can't be negative"
+        assert self.timeout >= 0, "timeout can't be negative"
         if required:
             assert not default_on_timeout, "default is not allowed for required input"
 
     @property
-    def _tuple(self) -> Tuple:
-        return (
-            self.name,
-            self.data_type,
-            self.nullable,
-            self.required,
-            self.default_value,
-            self.timeout_sec,
-            self.default_on_timeout,
-        )
+    def attributes(self) -> List[str]:
+        return ["name", "data_type", "nullable",
+                "required", "default_value",
+                "timeout", "default_on_timeout",
+                "metadata"]
 
 
 T = TypeVar("T", bound="OutputSpec")
 
 
-def _parse_spec(obj: Any, to_type: Generic[T]) -> T:
-    if isinstance(obj, to_type):
-        return obj
-    if isinstance(obj, str):
-        obj = json.loads(obj)
-    assert isinstance(obj, dict)
-    return to_type(**obj)
-
-
-def _parse_spec_collection(obj: Any, to_type: Generic[T]) -> IndexedOrderedDict[str, T]:
-    res: IndexedOrderedDict[str, T] = IndexedOrderedDict()
-    for k, v in IndexedOrderedDict(obj):
-        k = str(k)
-        assert_or_throw(k not in res, KeyError(f"{k} already exists"))
-        res[str(k)] = _parse_spec(v)
-    return res
-
-
 class TaskSpec(object):
     def __init__(
         self,
-        configs: IndexedOrderedDict[str, ConfigSpec],
-        inputs: IndexedOrderedDict[str, InputSpec],
-        outputs: IndexedOrderedDict[str, OutputSpec],
-        func: Callable[
-            ["ConfigCollection", "InputCollection", "OutputCollection"], None
-        ],
+        configs: Any,
+        inputs: Any,
+        outputs: Any,
+        func: Any,
         metadata: Any = None,
     ):
-        self.configs = configs
-        self.inputs = inputs
-        self.outputs = outputs
-        self.func = func
+        self.configs = self._parse_spec_collection(configs, ConfigSpec)
+        self.inputs = self._parse_spec_collection(inputs, InputSpec)
+        self.outputs = self._parse_spec_collection(outputs, OutputSpec)
         self.metadata = ParamDict(metadata, deep=True)
+        self.func = to_function(func)
+
+    def __uuid__(self) -> str:
+        return to_uuid(self.configs, self.inputs, self.outputs,
+                       get_full_type_path(self.func), self.metadata)
+
+    def to_json(self, indent: bool = False) -> str:
+        o = dict(
+            configs={c.name: c.paramdict for c in self.configs.values()},
+            inputs={c.name: c.paramdict for c in self.inputs.values()},
+            outputs={c.name: c.paramdict for c in self.outputs.values()},
+            func=get_full_type_path(self.func),
+            metadata=self.metadata
+        )
+        if not indent:
+            return json.dumps(o, separators=(",", ":"))
+        else:
+            return json.dumps(o, indent=4)
+
+    def _parse_spec(self, obj: Any, to_type: Type[T]) -> T:
+        if isinstance(obj, to_type):
+            return obj
+        if isinstance(obj, str):
+            obj = json.loads(obj)
+        assert isinstance(obj, dict)
+        return to_type(**obj)
+
+    def _parse_spec_collection(
+        self, obj: Any, to_type: Type[T]
+    ) -> IndexedOrderedDict[str, T]:
+        res: IndexedOrderedDict[str, T] = IndexedOrderedDict()
+        for k, v in IndexedOrderedDict(obj):
+            k = str(k)
+            assert_or_throw(k not in res, KeyError(f"{k} already exists"))
+            res[str(k)] = self._parse_spec(v, to_type)
+        return res
 
 
 class Output(object):
@@ -166,9 +176,8 @@ class Output(object):
     def __repr__(self) -> str:
         return f"{self._task}->{self._spec})"
 
-    @property
-    def id(self) -> str:
-        return to_uuid(self._task.id, self._spec.id)
+    def __uuid__(self) -> str:
+        return to_uuid(self._task.__uuid__(), self._spec.__uuid__())
 
     def set(self, value: Any) -> None:
         if not self._value_set.is_set():
@@ -207,16 +216,15 @@ class Input(object):
     def __repr__(self) -> str:
         return f"{self._output}->{self._spec})"
 
-    @property
-    def id(self) -> str:
-        return to_uuid(self._output.id, self._spec.id)
+    def __uuid__(self) -> str:
+        return to_uuid(self._output.__uuid__(), self._spec.__uuid__())
 
     def get(self) -> Any:
-        if not self._output._value_set.wait(self._spec.timeout_sec):
+        if not self._output._value_set.wait(self._spec.timeout):
             if self._spec.default_on_timeout and not self._spec.required:
                 return self._spec.default_value
             raise TimeoutError(
-                f"Unable to get value in {self._spec.timeout_sec} seconds from {self}"
+                f"Unable to get value in {self._spec.timeout} seconds from {self}"
             )
         if self._output._exception is not None:
             raise self._output._exception
@@ -239,15 +247,14 @@ class Input(object):
 class ConfigVar(object):
     def __init__(self, spec: ConfigSpec):
         self._is_set = False
-        self._value = None
+        self._value: Any = None
         self._spec = spec
 
     def __repr__(self) -> str:
         return f"{self._spec}: {self._value}"
 
-    @property
-    def id(self) -> str:
-        return to_uuid(self._value, self._spec.id)
+    def __uuid__(self) -> str:
+        return to_uuid(self._value, self._spec.__uuid__())
 
     def set(self, value: Any):
         if isinstance(value, ConfigVar):
@@ -284,17 +291,5 @@ class OutputCollection(object):
 
 
 class Task(object):
-    @property
-    def id(self) -> str:
+    def __uuid__(self) -> str:
         raise NotImplementedError
-
-
-class Workflow(object):
-    def add_task(
-        self,
-        config: ParamDict,
-        input: ParamDict,
-        output: ParamDict,
-        func: Callable[[ConfigCollection, InputCollection, OutputCollection], None],
-    ) -> Task:
-        pass

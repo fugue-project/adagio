@@ -2,6 +2,7 @@ from adagio.task import ConfigSpec, ConfigVar, Input, InputSpec, Output, OutputS
 from pytest import raises
 from triad.collections.dict import ParamDict
 from triad.utils.hash import to_uuid
+from typing import cast, Callable
 
 
 def test_outputspec():
@@ -52,7 +53,7 @@ def test_inputspec():
     assert s.validate_value(t) is t
 
     s = InputSpec("a", Task, False, True, None, timeout=3, default_on_timeout=False)
-    assert 3 == s.timeout_sec
+    assert 3 == s.timeout
     assert not s.default_on_timeout
     o = OutputSpec("x", Task, True)
     raises(AssertionError, lambda: s.validate_spec(o))  # nullable issue
@@ -70,7 +71,7 @@ def test_output():
     t = MockTaskForVar()
     s = OutputSpec("o", dict, False)
     o = Output(t, s)
-    assert to_uuid(t.id, s.id) == o.id
+    assert to_uuid(t.__uuid__(), s.__uuid__()) == o.__uuid__()
     assert not o.is_set
     assert not o.is_successful
     assert not o.is_failed
@@ -179,7 +180,15 @@ def test_configvar():
     assert p3 is c2.get()
 
 
+def _dummy(a: int, b: str) -> float:
+    return 0.0
+
+
+def test_cast():
+    x=cast(Callable[[int], float], _dummy)
+    print(x)
+
+
 class MockTaskForVar(Task):
-    @property
-    def id(self) -> str:
+    def __uuid__(self) -> str:
         return "id"
