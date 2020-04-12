@@ -26,8 +26,7 @@ class OutputSpec(object):
 
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
-            assert isinstance(
-                obj, self.data_type), f"{obj} mismatches type {self}"
+            assert isinstance(obj, self.data_type), f"{obj} mismatches type {self}"
             return obj
         assert self.nullable, f"Can't set None to {self}"
         return obj
@@ -38,9 +37,15 @@ class OutputSpec(object):
 
 
 class ConfigSpec(OutputSpec):
-    def __init__(self, name: str, data_type: Any, nullable: bool,
-                 required: bool, default_value: Any,
-                 metadata: Any = None):
+    def __init__(
+        self,
+        name: str,
+        data_type: Any,
+        nullable: bool,
+        required: bool,
+        default_value: Any,
+        metadata: Any = None,
+    ):
         super().__init__(name, data_type, nullable, metadata)
         self.required = required
         self.default_value = default_value
@@ -50,8 +55,8 @@ class ConfigSpec(OutputSpec):
             assert nullable, "default_value can't be None because it's not nullable"
         else:
             assert isinstance(
-                default_value,
-                self.data_type), f"{default_value} is not of type {data_type}"
+                default_value, self.data_type
+            ), f"{default_value} is not of type {data_type}"
 
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
@@ -62,21 +67,34 @@ class ConfigSpec(OutputSpec):
     def validate_spec(self, spec: OutputSpec) -> OutputSpec:
         if not self.nullable:
             assert not spec.nullable, f"{self} - {spec} are not compatible on nullable"
-        assert issubclass(spec.data_type, self.data_type), \
-            f"{self} - {spec} are not compatible on data_type"
+        assert issubclass(
+            spec.data_type, self.data_type
+        ), f"{self} - {spec} are not compatible on data_type"
         return spec
 
     @property
     def _tuple(self) -> Tuple:
-        return (self.name, self.data_type, self.nullable,
-                self.required, self.default_value)
+        return (
+            self.name,
+            self.data_type,
+            self.nullable,
+            self.required,
+            self.default_value,
+        )
 
 
 class InputSpec(ConfigSpec):
-    def __init__(self, name: str, data_type: Any, nullable: bool,
-                 required: bool, default_value: Any,
-                 timeout: Any = 0, default_on_timeout: bool = True,
-                 metadata: Any = None):
+    def __init__(
+        self,
+        name: str,
+        data_type: Any,
+        nullable: bool,
+        required: bool,
+        default_value: Any,
+        timeout: Any = 0,
+        default_on_timeout: bool = True,
+        metadata: Any = None,
+    ):
         super().__init__(name, data_type, nullable, required, default_value, metadata)
         self.timeout_sec = to_timedelta(timeout).total_seconds()
         self.default_on_timeout = default_on_timeout
@@ -86,12 +104,18 @@ class InputSpec(ConfigSpec):
 
     @property
     def _tuple(self) -> Tuple:
-        return (self.name, self.data_type, self.nullable,
-                self.required, self.default_value,
-                self.timeout_sec, self.default_on_timeout)
+        return (
+            self.name,
+            self.data_type,
+            self.nullable,
+            self.required,
+            self.default_value,
+            self.timeout_sec,
+            self.default_on_timeout,
+        )
 
 
-T = TypeVar('T', bound='OutputSpec')
+T = TypeVar("T", bound="OutputSpec")
 
 
 def _parse_spec(obj: Any, to_type: Generic[T]) -> T:
@@ -103,10 +127,7 @@ def _parse_spec(obj: Any, to_type: Generic[T]) -> T:
     return to_type(**obj)
 
 
-def _parse_spec_collection(
-    obj: Any,
-    to_type: Generic[T]
-) -> IndexedOrderedDict[str, T]:
+def _parse_spec_collection(obj: Any, to_type: Generic[T]) -> IndexedOrderedDict[str, T]:
     res: IndexedOrderedDict[str, T] = IndexedOrderedDict()
     for k, v in IndexedOrderedDict(obj):
         k = str(k)
@@ -121,11 +142,10 @@ class TaskSpec(object):
         configs: IndexedOrderedDict[str, ConfigSpec],
         inputs: IndexedOrderedDict[str, InputSpec],
         outputs: IndexedOrderedDict[str, OutputSpec],
-        func: Callable[["ConfigCollection",
-                        "InputCollection",
-                        "OutputCollection"],
-                       None],
-        metadata: Any = None
+        func: Callable[
+            ["ConfigCollection", "InputCollection", "OutputCollection"], None
+        ],
+        metadata: Any = None,
     ):
         self.configs = configs
         self.inputs = inputs
@@ -196,7 +216,8 @@ class Input(object):
             if self._spec.default_on_timeout and not self._spec.required:
                 return self._spec.default_value
             raise TimeoutError(
-                f"Unable to get value in {self._spec.timeout_sec} seconds from {self}")
+                f"Unable to get value in {self._spec.timeout_sec} seconds from {self}"
+            )
         if self._output._exception is not None:
             raise self._output._exception
         else:
@@ -270,10 +291,10 @@ class Task(object):
 
 class Workflow(object):
     def add_task(
-            self,
-            config: ParamDict,
-            input: ParamDict,
-            output: ParamDict,
-            func: Callable[[ConfigCollection, InputCollection, OutputCollection], None]
+        self,
+        config: ParamDict,
+        input: ParamDict,
+        output: ParamDict,
+        func: Callable[[ConfigCollection, InputCollection, OutputCollection], None],
     ) -> Task:
         pass
