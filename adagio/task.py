@@ -5,7 +5,13 @@ from typing import Any, List, Optional, Type, TypeVar, Iterable
 
 from triad.collections.dict import IndexedOrderedDict, ParamDict
 from triad.utils.assertion import assert_or_throw
-from triad.utils.convert import get_full_type_path, to_function, to_timedelta, to_type, as_type
+from triad.utils.convert import (
+    get_full_type_path,
+    to_function,
+    to_timedelta,
+    to_type,
+    as_type,
+)
 from triad.utils.hash import to_uuid
 from triad.utils.string import assert_triad_var_name
 
@@ -25,9 +31,10 @@ class OutputSpec(object):
 
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
-            assert_or_throw(isinstance(
-                obj, self.data_type
-            ), f"{obj} mismatches type {self.paramdict}")
+            assert_or_throw(
+                isinstance(obj, self.data_type),
+                f"{obj} mismatches type {self.paramdict}",
+            )
             return obj
         assert_or_throw(self.nullable, f"Can't set None to {self}")
         return obj
@@ -64,11 +71,13 @@ class ConfigSpec(OutputSpec):
         self.required = required
         self.default_value = default_value
         if required:
-            assert_or_throw(default_value is None,
-                            "required var can't have default_value")
+            assert_or_throw(
+                default_value is None, "required var can't have default_value"
+            )
         elif default_value is None:
             assert_or_throw(
-                nullable, "default_value can't be None because it's not nullable")
+                nullable, "default_value can't be None because it's not nullable"
+            )
         else:
             self.default_value = as_type(self.default_value, self.data_type)
 
@@ -80,11 +89,13 @@ class ConfigSpec(OutputSpec):
 
     def validate_spec(self, spec: OutputSpec) -> OutputSpec:
         if not self.nullable:
-            assert_or_throw(not spec.nullable,
-                            f"{self} - {spec} are not compatible on nullable")
-        assert_or_throw(issubclass(
-            spec.data_type, self.data_type
-        ), f"{self} - {spec} are not compatible on data_type")
+            assert_or_throw(
+                not spec.nullable, f"{self} - {spec} are not compatible on nullable"
+            )
+        assert_or_throw(
+            issubclass(spec.data_type, self.data_type),
+            f"{self} - {spec} are not compatible on data_type",
+        )
         return spec
 
     @property
@@ -116,8 +127,9 @@ class InputSpec(ConfigSpec):
         self.default_on_timeout = default_on_timeout
         assert_or_throw(self.timeout >= 0, "timeout can't be negative")
         if required:
-            assert_or_throw(not default_on_timeout,
-                            "default is not allowed for required input")
+            assert_or_throw(
+                not default_on_timeout, "default is not allowed for required input"
+            )
 
     @property
     def attributes(self) -> List[str]:
