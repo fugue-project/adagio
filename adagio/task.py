@@ -1,7 +1,7 @@
 import json
 from threading import Event
 from traceback import StackSummary, extract_stack
-from typing import Any, List, Optional, Type, TypeVar, Iterable
+from typing import Any, List, Optional, Type, TypeVar
 
 from triad.collections.dict import IndexedOrderedDict, ParamDict
 from triad.utils.assertion import assert_or_throw
