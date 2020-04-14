@@ -1,8 +1,11 @@
-from adagio.task import ConfigSpec, ConfigVar, Input, InputSpec, Output, OutputSpec, Task
+import json
+from typing import Callable, cast
+
+from adagio.task import (ConfigSpec, ConfigVar, Input, InputSpec, Output,
+                         OutputSpec, Task, TaskSpec)
 from pytest import raises
 from triad.collections.dict import ParamDict
 from triad.utils.hash import to_uuid
-from typing import cast, Callable
 
 
 def test_outputspec():
@@ -32,7 +35,8 @@ def test_inputspec():
     raises(AssertionError, lambda: InputSpec(
         "a", "int", True, True, 1, default_on_timeout=False))
     # default_value must be an instance of data_type
-    raises(AssertionError, lambda: InputSpec("a", "int", True, False, "abc"))
+    raises(ValueError, lambda: InputSpec("a", "int", True, False, "abc"))
+    assert 10 == InputSpec("a", "int", True, False, "10").default_value
 
     InputSpec("a", int, False, True, None, default_on_timeout=False)
     InputSpec("a", int, True, True, None, default_on_timeout=False)
@@ -65,6 +69,57 @@ def test_inputspec():
     assert o is s.validate_spec(o)
     o = OutputSpec("x", Task, False)
     assert o is s.validate_spec(o)
+
+
+def test_taskspec():
+    configs = [
+        dict(
+            name="ca",
+            data_type=int,
+            nullable=False,
+            required=False,
+            default_value=2
+        )
+    ]
+    inputs = [
+        dict(
+            name="ia",
+            data_type=str,
+            nullable=True,
+            required=True,
+            timeout="1s"
+        ),
+        dict(
+            name="ib",
+            data_type=str,
+            nullable=True,
+            required=True,
+            timeout="1s"
+        )
+    ]
+    outputs = [
+        dict(
+            name="oa",
+            data_type=float,
+            nullable=False
+        )
+    ]
+    func = _mock_task_func
+    metadata = dict(x=1, y="b")
+    ts = TaskSpec(configs, inputs, outputs, func, metadata)
+    j = ts.to_json(True)
+    j2 = TaskSpec(**json.loads(j)).to_json(True)
+    assert j == j2
+    j = ts.to_json(False)
+    j2 = TaskSpec(**json.loads(j)).to_json(False)
+    assert j == j2
+
+    configs = [ConfigSpec(**configs[0])]
+    outputs = [json.dumps(OutputSpec(**outputs[0]).jsondict)]
+    ts = TaskSpec(configs, inputs, outputs, func, metadata)
+    j2 = ts.to_json(False)
+    assert j == j2
+
 
 
 def test_output():
@@ -185,8 +240,12 @@ def _dummy(a: int, b: str) -> float:
 
 
 def test_cast():
-    x=cast(Callable[[int], float], _dummy)
+    x = cast(Callable[[int], float], _dummy)
     print(x)
+
+
+def _mock_task_func():
+    pass
 
 
 class MockTaskForVar(Task):

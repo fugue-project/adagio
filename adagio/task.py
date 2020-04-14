@@ -1,12 +1,11 @@
 import json
 from threading import Event
 from traceback import StackSummary, extract_stack
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, List, Optional, Type, TypeVar, Iterable
 
 from triad.collections.dict import IndexedOrderedDict, ParamDict
 from triad.utils.assertion import assert_or_throw
-from triad.utils.convert import (get_full_type_path, to_function, to_timedelta,
-                                 to_type)
+from triad.utils.convert import get_full_type_path, to_function, to_timedelta, to_type, as_type
 from triad.utils.hash import to_uuid
 from triad.utils.string import assert_triad_var_name
 
@@ -26,10 +25,11 @@ class OutputSpec(object):
 
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
-            assert isinstance(
-                obj, self.data_type), f"{obj} mismatches type {self.paramdict}"
+            assert_or_throw(isinstance(
+                obj, self.data_type
+            ), f"{obj} mismatches type {self.paramdict}")
             return obj
-        assert self.nullable, f"Can't set None to {self}"
+        assert_or_throw(self.nullable, f"Can't set None to {self}")
         return obj
 
     @property
@@ -40,6 +40,15 @@ class OutputSpec(object):
     def paramdict(self) -> ParamDict:
         return ParamDict((x, self.__dict__[x]) for x in self.attributes)
 
+    @property
+    def jsondict(self) -> ParamDict:
+        res = ParamDict()
+        for k, v in self.paramdict.items():
+            if isinstance(v, type):
+                v = get_full_type_path(v)
+            res[k] = v
+        return res
+
 
 class ConfigSpec(OutputSpec):
     def __init__(
@@ -47,40 +56,47 @@ class ConfigSpec(OutputSpec):
         name: str,
         data_type: Any,
         nullable: bool,
-        required: bool,
-        default_value: Any,
+        required: bool = True,
+        default_value: Any = None,
         metadata: Any = None,
     ):
         super().__init__(name, data_type, nullable, metadata)
         self.required = required
         self.default_value = default_value
         if required:
-            assert default_value is None, "required var can't have default_value"
+            assert_or_throw(default_value is None,
+                            "required var can't have default_value")
         elif default_value is None:
-            assert nullable, "default_value can't be None because it's not nullable"
+            assert_or_throw(
+                nullable, "default_value can't be None because it's not nullable")
         else:
-            assert isinstance(
-                default_value, self.data_type
-            ), f"{default_value} is not of type {data_type}"
+            self.default_value = as_type(self.default_value, self.data_type)
 
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
             return super().validate_value(obj)
-        assert self.nullable, f"Can't set None to {self.paramdict}"
+        assert_or_throw(self.nullable, f"Can't set None to {self.paramdict}")
         return obj
 
     def validate_spec(self, spec: OutputSpec) -> OutputSpec:
         if not self.nullable:
-            assert not spec.nullable, f"{self} - {spec} are not compatible on nullable"
-        assert issubclass(
+            assert_or_throw(not spec.nullable,
+                            f"{self} - {spec} are not compatible on nullable")
+        assert_or_throw(issubclass(
             spec.data_type, self.data_type
-        ), f"{self} - {spec} are not compatible on data_type"
+        ), f"{self} - {spec} are not compatible on data_type")
         return spec
 
     @property
     def attributes(self) -> List[str]:
-        return ["name", "data_type", "nullable",
-                "required", "default_value", "metadata"]
+        return [
+            "name",
+            "data_type",
+            "nullable",
+            "required",
+            "default_value",
+            "metadata",
+        ]
 
 
 class InputSpec(ConfigSpec):
@@ -89,25 +105,32 @@ class InputSpec(ConfigSpec):
         name: str,
         data_type: Any,
         nullable: bool,
-        required: bool,
-        default_value: Any,
+        required: bool = True,
+        default_value: Any = None,
         timeout: Any = 0,
-        default_on_timeout: bool = True,
+        default_on_timeout: bool = False,
         metadata: Any = None,
     ):
         super().__init__(name, data_type, nullable, required, default_value, metadata)
         self.timeout = to_timedelta(timeout).total_seconds()
         self.default_on_timeout = default_on_timeout
-        assert self.timeout >= 0, "timeout can't be negative"
+        assert_or_throw(self.timeout >= 0, "timeout can't be negative")
         if required:
-            assert not default_on_timeout, "default is not allowed for required input"
+            assert_or_throw(not default_on_timeout,
+                            "default is not allowed for required input")
 
     @property
     def attributes(self) -> List[str]:
-        return ["name", "data_type", "nullable",
-                "required", "default_value",
-                "timeout", "default_on_timeout",
-                "metadata"]
+        return [
+            "name",
+            "data_type",
+            "nullable",
+            "required",
+            "default_value",
+            "timeout",
+            "default_on_timeout",
+            "metadata",
+        ]
 
 
 T = TypeVar("T", bound="OutputSpec")
@@ -115,12 +138,7 @@ T = TypeVar("T", bound="OutputSpec")
 
 class TaskSpec(object):
     def __init__(
-        self,
-        configs: Any,
-        inputs: Any,
-        outputs: Any,
-        func: Any,
-        metadata: Any = None,
+        self, configs: Any, inputs: Any, outputs: Any, func: Any, metadata: Any = None
     ):
         self.configs = self._parse_spec_collection(configs, ConfigSpec)
         self.inputs = self._parse_spec_collection(inputs, InputSpec)
@@ -129,16 +147,21 @@ class TaskSpec(object):
         self.func = to_function(func)
 
     def __uuid__(self) -> str:
-        return to_uuid(self.configs, self.inputs, self.outputs,
-                       get_full_type_path(self.func), self.metadata)
+        return to_uuid(
+            self.configs,
+            self.inputs,
+            self.outputs,
+            get_full_type_path(self.func),
+            self.metadata,
+        )
 
     def to_json(self, indent: bool = False) -> str:
         o = dict(
-            configs={c.name: c.paramdict for c in self.configs.values()},
-            inputs={c.name: c.paramdict for c in self.inputs.values()},
-            outputs={c.name: c.paramdict for c in self.outputs.values()},
+            configs=[c.jsondict for c in self.configs.values()],
+            inputs=[c.jsondict for c in self.inputs.values()],
+            outputs=[c.jsondict for c in self.outputs.values()],
             func=get_full_type_path(self.func),
-            metadata=self.metadata
+            metadata=self.metadata,
         )
         if not indent:
             return json.dumps(o, separators=(",", ":"))
@@ -150,17 +173,18 @@ class TaskSpec(object):
             return obj
         if isinstance(obj, str):
             obj = json.loads(obj)
-        assert isinstance(obj, dict)
+        assert_or_throw(isinstance(obj, dict), f"{obj} is not dict")
         return to_type(**obj)
 
     def _parse_spec_collection(
         self, obj: Any, to_type: Type[T]
     ) -> IndexedOrderedDict[str, T]:
         res: IndexedOrderedDict[str, T] = IndexedOrderedDict()
-        for k, v in IndexedOrderedDict(obj):
-            k = str(k)
-            assert_or_throw(k not in res, KeyError(f"{k} already exists"))
-            res[str(k)] = self._parse_spec(v, to_type)
+        assert_or_throw(isinstance(obj, List), "Spec collection must be a list")
+        for v in obj:
+            s = self._parse_spec(v, to_type)
+            assert_or_throw(s.name not in res, KeyError(f"Duplicated key {s.name}"))
+            res[s.name] = s
         return res
 
 
@@ -266,7 +290,7 @@ class ConfigVar(object):
 
     def get(self) -> Any:
         if not self._is_set:
-            assert not self._spec.required, f"{self} is required but not set"
+            assert_or_throw(not self._spec.required, f"{self} is required but not set")
             return self._spec.default_value
         if isinstance(self._value, ConfigVar):
             return self._value.get()
