@@ -81,7 +81,7 @@ def _parse_annotation(anno: Any) -> Dict[str, Any]:
 def _try_parse(anno: Any) -> Optional[Dict[str, Any]]:
     if anno is None or anno == inspect.Parameter.empty or anno is Any:
         return dict(data_type=object, nullable=True)
-    if isinstance(anno, type):
+    if _is_native_type(anno):
         assert_or_throw(
             anno is not type(None), TypeError(f"{anno} NoneType is invalid")
         )  # noqa: E721
@@ -103,9 +103,13 @@ def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
         anno = type(None)
     if assert_is_type:
         assert_or_throw(
-            isinstance(anno, type), TypeError(f"Can't find python type for {anno}")
+            _is_native_type(anno), TypeError(f"Can't find python type for {anno}")
         )
     return anno
+
+
+def _is_native_type(anno: Any) -> bool:
+    return isinstance(anno, type) and anno.__module__ != "typing"
 
 
 def _is_tuple(anno: Any):
