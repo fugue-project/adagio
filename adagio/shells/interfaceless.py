@@ -90,15 +90,16 @@ def _try_parse(anno: Any) -> Optional[Dict[str, Any]]:
 
 
 def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
-    if anno is Any:
-        return object
-    if hasattr(typing, "get_origin"):  # pragma: no cover
-        anno = typing.get_origin(anno)  # type: ignore  # 3.8
-    elif hasattr(anno, "__extra__"):  # pragma: no cover
-        anno = anno.__extra__  # < 3.7
-    elif hasattr(anno, "__origin__"):  # pragma: no cover
-        anno = anno.__origin__  # 3.7
-    if anno is None:
+    if anno is not None and anno.__module__ == "typing":
+        if anno is Any:
+            return object
+        if hasattr(typing, "get_origin"):  # pragma: no cover
+            anno = typing.get_origin(anno)  # type: ignore  # 3.8
+        elif hasattr(anno, "__extra__"):  # pragma: no cover
+            anno = anno.__extra__  # < 3.7
+        elif hasattr(anno, "__origin__"):  # pragma: no cover
+            anno = anno.__origin__  # 3.7
+    if anno is None:  # pragma: no cover
         anno = type(None)
     if assert_is_type:
         assert_or_throw(
