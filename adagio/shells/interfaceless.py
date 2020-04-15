@@ -90,8 +90,6 @@ def _try_parse(anno: Any) -> Optional[Dict[str, Any]]:
 
 
 def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
-    if isinstance(anno, type):
-        return anno
     if anno is Any:
         return object
     if hasattr(typing, "get_origin"):  # pragma: no cover
@@ -100,12 +98,6 @@ def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
         anno = anno.__extra__  # < 3.7
     elif hasattr(anno, "__origin__"):  # pragma: no cover
         anno = anno.__origin__  # 3.7
-    if anno is typing.Dict:  # pragma: no cover
-        anno = dict
-    elif anno is typing.List:  # pragma: no cover
-        anno = list
-    elif anno is typing.Tuple:  # pragma: no cover
-        anno = tuple
     if assert_is_type:
         assert_or_throw(
             isinstance(anno, type), TypeError(f"Can't find python type for {anno}")
