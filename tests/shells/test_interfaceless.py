@@ -89,6 +89,8 @@ def test__parse_annotation():
 def test__get_origin_type():
     assert _get_origin_type(Any) is object
     assert _get_origin_type(Dict[str, Any]) is dict
+    assert _get_origin_type(List[str]) is list
+    assert _get_origin_type(List[Any]) is list
     assert _get_origin_type(Tuple[int, str]) is tuple
     assert _get_origin_type(Union[int, str], False) is Union
     assert _get_origin_type(Union[None]) is type(None)

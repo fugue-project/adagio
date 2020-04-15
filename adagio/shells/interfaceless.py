@@ -1,4 +1,5 @@
 import inspect
+import typing
 from typing import Any, Callable, Dict, List, Optional, Union, get_type_hints
 
 from adagio.specs import ConfigSpec, InputSpec, OutputSpec, TaskSpec
@@ -94,12 +95,12 @@ def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
     if anno is Any:
         return object
     tp: Any = None
-    if hasattr(anno, "get_origin"):  # pragma: no cover
-        tp = anno.get_origin()  # python 3.8
-    elif hasattr(anno, "__origin__"):  # pragma: no cover
-        tp = anno.__origin__  # 3.7
+    if hasattr(typing, "get_origin"):  # pragma: no cover
+        tp = typing.get_origin(anno)  # type: ignore  # 3.8
     elif hasattr(anno, "__extra__"):  # pragma: no cover
         tp = anno.__extra__  # < 3.7
+    elif hasattr(anno, "__origin__"):  # pragma: no cover
+        tp = anno.__origin__  # 3.7
     if assert_is_type:
         assert_or_throw(
             isinstance(tp, type), TypeError(f"Can't find python type for {anno}")
