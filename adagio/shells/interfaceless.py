@@ -94,18 +94,23 @@ def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
         return anno
     if anno is Any:
         return object
-    tp: Any = None
     if hasattr(typing, "get_origin"):  # pragma: no cover
-        tp = typing.get_origin(anno)  # type: ignore  # 3.8
+        anno = typing.get_origin(anno)  # type: ignore  # 3.8
     elif hasattr(anno, "__extra__"):  # pragma: no cover
-        tp = anno.__extra__  # < 3.7
+        anno = anno.__extra__  # < 3.7
     elif hasattr(anno, "__origin__"):  # pragma: no cover
-        tp = anno.__origin__  # 3.7
+        anno = anno.__origin__  # 3.7
+    if anno is typing.Dict:  # pragma: no cover
+        anno = dict
+    elif anno is typing.List:  # pragma: no cover
+        anno = list
+    elif anno is typing.Tuple:  # pragma: no cover
+        anno = tuple
     if assert_is_type:
         assert_or_throw(
-            isinstance(tp, type), TypeError(f"Can't find python type for {anno}")
+            isinstance(anno, type), TypeError(f"Can't find python type for {anno}")
         )
-    return tp
+    return anno
 
 
 def _is_tuple(anno: Any):
