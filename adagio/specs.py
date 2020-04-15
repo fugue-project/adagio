@@ -31,11 +31,23 @@ class OutputSpec(object):
         if obj is not None:
             assert_or_throw(
                 isinstance(obj, self.data_type),
-                f"{obj} mismatches type {self.paramdict}",
+                TypeError(f"{obj} mismatches type {self.paramdict}"),
             )
             return obj
         assert_or_throw(self.nullable, f"Can't set None to {self}")
         return obj
+
+    def validate_spec(self, spec: "OutputSpec") -> "OutputSpec":
+        if not self.nullable:
+            assert_or_throw(
+                not spec.nullable,
+                TypeError(f"{self} - {spec} are not compatible on nullable"),
+            )
+        assert_or_throw(
+            issubclass(spec.data_type, self.data_type),
+            TypeError(f"{self} - {spec} are not compatible on data_type"),
+        )
+        return spec
 
     @property
     def attributes(self) -> List[str]:
@@ -84,17 +96,6 @@ class ConfigSpec(OutputSpec):
             return super().validate_value(obj)
         assert_or_throw(self.nullable, f"Can't set None to {self.paramdict}")
         return obj
-
-    def validate_spec(self, spec: OutputSpec) -> OutputSpec:
-        if not self.nullable:
-            assert_or_throw(
-                not spec.nullable, f"{self} - {spec} are not compatible on nullable"
-            )
-        assert_or_throw(
-            issubclass(spec.data_type, self.data_type),
-            f"{self} - {spec} are not compatible on data_type",
-        )
-        return spec
 
     @property
     def attributes(self) -> List[str]:
@@ -246,26 +247,25 @@ class _WorkflowSpecNode(object):
                     t[0] in self.workflow.inputs,
                     f"{t[0]} is not an input of the workflow",
                 )
-            elif len(t) == 2:
+                self.task.inputs[f[1]].validate_spec(self.workflow.inputs[t[0]])
+            else:  # len(t) == 2
                 assert_or_throw(
-                    t[1] != self.name, f"{to_expr} tries to connect to self"
+                    t[0] != self.name, f"{to_expr} tries to connect to self"
                 )
-                node = self.workflow.nodes[t[1]]
+                node = self.workflow.nodes[t[0]]
                 assert_or_throw(
-                    t[0] in node.task.outputs, f"{t[0]} is not an output of {node}"
+                    t[1] in node.task.outputs, f"{t[1]} is not an output of {node}"
                 )
-            else:
-                raise SyntaxError(f"{to_expr} is an invalid expression")
+                self.task.inputs[f[1]].validate_spec(node.task.outputs[t[1]])
         elif f[0] == "config":
             assert_or_throw(
                 f[1] in self.task.configs, f"{f[1]} is not a config of {self.task}"
             )
             assert_or_throw(
-                len(t) == 1, SyntaxError(f"{to_expr} is an invalid config expression")
+                to_expr in self.workflow.configs,
+                f"{to_expr} is not a config of the workflow",
             )
-            assert_or_throw(
-                t[0] in self.workflow.configs, f"{t[0]} is not a config of the workflow"
-            )
+            self.task.configs[f[1]].validate_spec(self.workflow.configs[to_expr])
         else:
             raise SyntaxError(f"{from_expr} is an invalid expression")
         self._linked.add(from_expr)
@@ -273,7 +273,7 @@ class _WorkflowSpecNode(object):
 
     @property
     def jsondict(self) -> ParamDict:
-        return dict(name=self.name, task=self.task, links=self.links)
+        return dict(name=self.name, task=self.task.jsondict, links=self.links)
 
     def validate(self) -> None:
         defined = set(  # noqa: C401
@@ -330,13 +330,13 @@ class WorkflowSpec(TaskSpec):
             assert_or_throw(
                 t[0] in self.inputs, f"{t[0]} is not an input of the workflow"
             )
-        elif len(t) == 2:
-            node = self.nodes[t[1]]
+            self.outputs[f].validate_spec(self.inputs[t[0]])
+        else:  # len(t) == 2
+            node = self.nodes[t[0]]
             assert_or_throw(
-                t[0] in node.task.outputs, f"{t[0]} is not an output of {node}"
+                t[1] in node.task.outputs, f"{t[1]} is not an output of {node}"
             )
-        else:
-            raise SyntaxError(f"{to_expr} is an invalid expression")
+            self.outputs[f].validate_spec(node.task.outputs[t[1]])
         self._linked.add(f)
         self.links.append(expr)
 
@@ -348,11 +348,13 @@ class WorkflowSpec(TaskSpec):
         return d
 
     def validate(self) -> None:
+        for n in self.nodes.values():
+            n.validate()
         defined = set(self._linked)
         expected = set(self.outputs.keys())
         diff = expected.difference(defined)
         assert_or_throw(len(diff) == 0, f"Outputs {diff} are not linked")
 
 
-def _no_op(self, *args, **kwargs):
+def _no_op(self, *args, **kwargs):  # pragma: no cover
     pass

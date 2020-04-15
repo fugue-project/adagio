@@ -45,6 +45,8 @@ def function_to_taskspec(
     anno = annotations.get("return", sig.return_annotation)
     is_multiple = _is_tuple(anno)
     for x in list(anno.__args__) if is_multiple else [anno]:
+        if x == inspect.Parameter.empty or x is type(None):  # noqa: E721
+            continue
         a = _parse_annotation(x)
         a["name"] = f"_{n}"
         outputs.append(OutputSpec(**a))

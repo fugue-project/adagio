@@ -28,7 +28,6 @@ def test_function_to_taskspec():
 
     ts = function_to_taskspec(f2, lambda ds: [d["data_type"] is not int for d in ds],
                               deterministic=False, lazy=True)
-    print(ts.to_json(True))
     assert ts.lazy
     assert not ts.deterministic
 
@@ -36,12 +35,27 @@ def test_function_to_taskspec():
     assert "a" in ts.inputs and "c" in ts.inputs
     assert 1 == len(ts.configs)
     assert "b" in ts.configs
+    assert ts.configs["b"].data_type is object
+    assert ts.configs["b"].nullable
     assert 2 == len(ts.outputs)
     assert "_0" in ts.outputs and "_1" in ts.outputs
     assert not ts.outputs["_0"].nullable
     assert ts.outputs["_1"].nullable
 
-    # TODO: not test on func and metadata because that is supposed to change to something else
+    ts = function_to_taskspec(f3, lambda ds: [d["data_type"] is not int for d in ds])
+    print(ts.to_json(True))
+    assert 0 == len(ts.outputs)
+
+    ts = function_to_taskspec(f4, lambda ds: [d["data_type"] is not int for d in ds])
+    print(ts.to_json(True))
+    assert 0 == len(ts.outputs)
+
+    ts = function_to_taskspec(f5, lambda ds: [d["data_type"] is not int for d in ds])
+    print(ts.to_json(True))
+    assert 0 == len(ts.inputs)
+    assert 0 == len(ts.outputs)
+
+    # TODO: not tested on func and metadata because that is supposed to change to something else
 
 
 def test__parse_annotation():
@@ -82,5 +96,17 @@ def f1(a: Optional[int], b: "int", c: str, d: "Optional[str]" = "x") -> "int":
     return a + b
 
 
-def f2(a: int, b: str, c: int) -> "Tuple[int,Optional[str]]":
+def f2(a: int, b, c: int) -> "Tuple[int,Optional[str]]":
     return a + c
+
+
+def f3(a: int, b: str, c: int):
+    pass
+
+
+def f4(a: int, b: str, c: int) -> None:
+    pass
+
+
+def f5():
+    pass
