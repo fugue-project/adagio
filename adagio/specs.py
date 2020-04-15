@@ -1,16 +1,14 @@
 import json
-from threading import Event
-from traceback import StackSummary, extract_stack
-from typing import Any, List, Optional, Type, TypeVar
+from typing import Any, List, Set, Type, TypeVar
 
 from triad.collections.dict import IndexedOrderedDict, ParamDict
 from triad.utils.assertion import assert_or_throw
 from triad.utils.convert import (
+    as_type,
     get_full_type_path,
     to_function,
     to_timedelta,
     to_type,
-    as_type,
 )
 from triad.utils.hash import to_uuid
 from triad.utils.string import assert_triad_var_name
@@ -150,13 +148,22 @@ T = TypeVar("T", bound="OutputSpec")
 
 class TaskSpec(object):
     def __init__(
-        self, configs: Any, inputs: Any, outputs: Any, func: Any, metadata: Any = None
+        self,
+        configs: Any,
+        inputs: Any,
+        outputs: Any,
+        func: Any,
+        metadata: Any = None,
+        deterministic: bool = True,
+        lazy: bool = False,
     ):
         self.configs = self._parse_spec_collection(configs, ConfigSpec)
         self.inputs = self._parse_spec_collection(inputs, InputSpec)
         self.outputs = self._parse_spec_collection(outputs, OutputSpec)
         self.metadata = ParamDict(metadata, deep=True)
         self.func = to_function(func)
+        self.deterministic = deterministic
+        self.lazy = lazy
 
     def __uuid__(self) -> str:
         return to_uuid(
@@ -165,20 +172,29 @@ class TaskSpec(object):
             self.outputs,
             get_full_type_path(self.func),
             self.metadata,
+            self.deterministic,
+            self.lazy,
         )
 
     def to_json(self, indent: bool = False) -> str:
-        o = dict(
-            configs=[c.jsondict for c in self.configs.values()],
-            inputs=[c.jsondict for c in self.inputs.values()],
-            outputs=[c.jsondict for c in self.outputs.values()],
-            func=get_full_type_path(self.func),
-            metadata=self.metadata,
-        )
         if not indent:
-            return json.dumps(o, separators=(",", ":"))
+            return json.dumps(self.jsondict, separators=(",", ":"))
         else:
-            return json.dumps(o, indent=4)
+            return json.dumps(self.jsondict, indent=4)
+
+    @property
+    def jsondict(self) -> ParamDict:
+        return ParamDict(
+            dict(
+                configs=[c.jsondict for c in self.configs.values()],
+                inputs=[c.jsondict for c in self.inputs.values()],
+                outputs=[c.jsondict for c in self.outputs.values()],
+                func=get_full_type_path(self.func),
+                metadata=self.metadata,
+                deterministic=self.deterministic,
+                lazy=self.lazy,
+            )
+        )
 
     def _parse_spec(self, obj: Any, to_type: Type[T]) -> T:
         if isinstance(obj, to_type):
@@ -200,132 +216,143 @@ class TaskSpec(object):
         return res
 
 
-class Output(object):
-    def __init__(self, task: "Task", spec: OutputSpec):
-        self._task = task
-        self._spec = spec
-
-        self._exception: Optional[Exception] = None
-        self._trace: Optional[StackSummary] = None
-        self._value_set = Event()
-
-    def __repr__(self) -> str:
-        return f"{self._task}->{self._spec})"
-
-    def __uuid__(self) -> str:
-        return to_uuid(self._task.__uuid__(), self._spec.__uuid__())
-
-    def set(self, value: Any) -> None:
-        if not self._value_set.is_set():
-            try:
-                self._value = self._spec.validate_value(value)
-                self._value_set.set()
-            except Exception as e:
-                e = ValueError(str(e))
-                self.fail(e)
-
-    def fail(self, exception: Exception, trace: Optional[StackSummary] = None) -> None:
-        if not self._value_set.is_set():
-            self._exception = exception
-            self._trace = trace or extract_stack()
-            self._value_set.set()
-            raise exception
-
-    @property
-    def is_set(self) -> bool:
-        return self._value_set.is_set()
-
-    @property
-    def is_successful(self) -> bool:
-        return self._exception is None and self._value_set.is_set()
-
-    @property
-    def is_failed(self) -> bool:
-        return self._exception is not None and self._value_set.is_set()
-
-
-class Input(object):
-    def __init__(self, spec: InputSpec, output: Output):
-        self._output = output
-        self._spec = spec
-
-    def __repr__(self) -> str:
-        return f"{self._output}->{self._spec})"
+class _WorkflowSpecNode(object):
+    def __init__(
+        self, workflow: "WorkflowSpec", name: str, task: TaskSpec, links: List[str]
+    ):
+        self.workflow = workflow
+        self.name = assert_triad_var_name(name)
+        self.task = task
+        self.links: List[str] = []
+        self._linked: Set[str] = set()
+        for l in links:
+            self._link(l)
 
     def __uuid__(self) -> str:
-        return to_uuid(self._output.__uuid__(), self._spec.__uuid__())
+        return to_uuid(self.name, self.task, sorted(self.links))
 
-    def get(self) -> Any:
-        if not self._output._value_set.wait(self._spec.timeout):
-            if self._spec.default_on_timeout and not self._spec.required:
-                return self._spec.default_value
-            raise TimeoutError(
-                f"Unable to get value in {self._spec.timeout} seconds from {self}"
+    def _link(self, expr: str) -> None:
+        e = expr.split(",", 1)
+        from_expr, to_expr = e[0], e[1]
+        assert_or_throw(from_expr not in self._linked, f"{from_expr} is already linked")
+        f = from_expr.split(".", 1)
+        t = to_expr.split(".", 1)
+        if f[0] == "input":
+            assert_or_throw(
+                f[1] in self.task.inputs, f"{f[1]} is not an input of {self.task}"
             )
-        if self._output._exception is not None:
-            raise self._output._exception
+            if len(t) == 1:
+                assert_or_throw(
+                    t[0] in self.workflow.inputs,
+                    f"{t[0]} is not an input of the workflow",
+                )
+            elif len(t) == 2:
+                assert_or_throw(
+                    t[1] != self.name, f"{to_expr} tries to connect to self"
+                )
+                node = self.workflow.nodes[t[1]]
+                assert_or_throw(
+                    t[0] in node.task.outputs, f"{t[0]} is not an output of {node}"
+                )
+            else:
+                raise SyntaxError(f"{to_expr} is an invalid expression")
+        elif f[0] == "config":
+            assert_or_throw(
+                f[1] in self.task.configs, f"{f[1]} is not a config of {self.task}"
+            )
+            assert_or_throw(
+                len(t) == 1, SyntaxError(f"{to_expr} is an invalid config expression")
+            )
+            assert_or_throw(
+                t[0] in self.workflow.configs, f"{t[0]} is not a config of the workflow"
+            )
         else:
-            return self._output._value
+            raise SyntaxError(f"{from_expr} is an invalid expression")
+        self._linked.add(from_expr)
+        self.links.append(expr)
 
     @property
-    def is_set(self) -> bool:
-        return self._output.is_set
+    def jsondict(self) -> ParamDict:
+        return dict(name=self.name, task=self.task, links=self.links)
 
-    @property
-    def is_successful(self) -> bool:
-        return self._output.is_successful
+    def validate(self) -> None:
+        defined = set(  # noqa: C401
+            x.split(".")[1] for x in self._linked if x.startswith("input.")
+        )
+        expected = set(self.task.inputs.keys())
+        diff = expected.difference(defined)
+        assert_or_throw(len(diff) == 0, f"Inputs {diff} are not linked")
 
-    @property
-    def is_failed(self) -> bool:
-        return self._output.is_failed
 
-
-class ConfigVar(object):
-    def __init__(self, spec: ConfigSpec):
-        self._is_set = False
-        self._value: Any = None
-        self._spec = spec
-
-    def __repr__(self) -> str:
-        return f"{self._spec}: {self._value}"
+class WorkflowSpec(TaskSpec):
+    def __init__(
+        self,
+        configs: Any,
+        inputs: Any,
+        outputs: Any,
+        metadata=None,
+        deterministic: bool = True,
+        lazy: bool = True,
+    ):
+        super().__init__(
+            configs,
+            inputs,
+            outputs,
+            _no_op,
+            metadata=metadata,
+            deterministic=deterministic,
+            lazy=lazy,
+        )
+        self.nodes: IndexedOrderedDict[str, _WorkflowSpecNode] = {}
+        self.links: List[str] = []
+        self._linked: Set[str] = set()
 
     def __uuid__(self) -> str:
-        return to_uuid(self._value, self._spec.__uuid__())
+        return to_uuid(super().__uuid__(), self.nodes, sorted(self.links))
 
-    def set(self, value: Any):
-        if isinstance(value, ConfigVar):
-            self._spec.validate_spec(value._spec)
-            self._value = value
+    def add_task(
+        self, name: str, task: TaskSpec, links: List[str]
+    ) -> _WorkflowSpecNode:
+        assert_or_throw(
+            name not in self.nodes, KeyError(f"{name} already exists in workflow")
+        )
+        node = _WorkflowSpecNode(self, name, task, links)
+        self.nodes[name] = node
+        return node
+
+    def link(self, expr: str):
+        e = expr.split(",", 1)
+        f, to_expr = e[0], e[1]
+        assert_or_throw(f not in self._linked, f"{f} is already linked")
+        t = to_expr.split(".", 1)
+        assert_or_throw(f in self.outputs, f"{f} is not an output of the workflow")
+        if len(t) == 1:
+            assert_or_throw(
+                t[0] in self.inputs, f"{t[0]} is not an input of the workflow"
+            )
+        elif len(t) == 2:
+            node = self.nodes[t[1]]
+            assert_or_throw(
+                t[0] in node.task.outputs, f"{t[0]} is not an output of {node}"
+            )
         else:
-            self._value = self._spec.validate_value(value)
-        self._is_set = True
+            raise SyntaxError(f"{to_expr} is an invalid expression")
+        self._linked.add(f)
+        self.links.append(expr)
 
-    def get(self) -> Any:
-        if not self._is_set:
-            assert_or_throw(not self._spec.required, f"{self} is required but not set")
-            return self._spec.default_value
-        if isinstance(self._value, ConfigVar):
-            return self._value.get()
-        return self._value
+    @property
+    def jsondict(self) -> ParamDict:
+        d = super().jsondict
+        d["nodes"] = [x.jsondict for x in self.nodes.values()]
+        d["links"] = self.links
+        return d
+
+    def validate(self) -> None:
+        defined = set(self._linked)
+        expected = set(self.outputs.keys())
+        diff = expected.difference(defined)
+        assert_or_throw(len(diff) == 0, f"Outputs {diff} are not linked")
 
 
-class ConfigCollection(object):
+def _no_op(self, *args, **kwargs):
     pass
-
-
-class InputCollection(object):
-    pass
-
-
-class OutputCollection(object):
-    def set_value(self, key: str, value: object) -> None:
-        pass
-
-    def get_value(self, key: str, timeout: Any) -> Any:
-        # delta = to_timedelta(timeout)
-        pass
-
-
-class Task(object):
-    def __uuid__(self) -> str:
-        raise NotImplementedError
