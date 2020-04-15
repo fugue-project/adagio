@@ -98,6 +98,8 @@ def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
         anno = anno.__extra__  # < 3.7
     elif hasattr(anno, "__origin__"):  # pragma: no cover
         anno = anno.__origin__  # 3.7
+    if anno is None:
+        anno = type(None)
     if assert_is_type:
         assert_or_throw(
             isinstance(anno, type), TypeError(f"Can't find python type for {anno}")
