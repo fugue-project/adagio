@@ -89,7 +89,10 @@ def test__parse_annotation():
 def test__get_origin_type():
     assert _get_origin_type(Any) is object
     assert _get_origin_type(Dict[str, Any]) is dict
-    raises(TypeError, lambda: _get_origin_type(int))
+    assert _get_origin_type(Tuple[int, str]) is tuple
+    assert _get_origin_type(Union[int, str], False) is Union
+    assert _get_origin_type(Union[None]) is type(None)
+    assert _get_origin_type(int) is int
 
 
 def f1(a: Optional[int], b: "int", c: str, d: "Optional[str]" = "x") -> "int":

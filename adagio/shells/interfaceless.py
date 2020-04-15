@@ -88,25 +88,28 @@ def _try_parse(anno: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _get_origin_type(anno: Any) -> type:
+def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
+    if isinstance(anno, type):
+        return anno
     if anno is Any:
         return object
     tp: Any = None
-    if hasattr(anno, "get_origin"):
-        tp = anno.get_origin()  # python 3.8 # pragma: no cover
-    elif hasattr(anno, "__extra__"):
-        tp = anno.__extra__  # < 3.7 # pragma: no cover
-    elif hasattr(anno, "__origin__"):
-        tp = anno.__origin__  # 3.7 # pragma: no cover
-    assert_or_throw(
-        isinstance(tp, type), TypeError(f"Can't find python type for {anno}")
-    )
+    if hasattr(anno, "get_origin"):  # pragma: no cover
+        tp = anno.get_origin()  # python 3.8
+    elif hasattr(anno, "__origin__"):  # pragma: no cover
+        tp = anno.__origin__  # 3.7
+    elif hasattr(anno, "__extra__"):  # pragma: no cover
+        tp = anno.__extra__  # < 3.7
+    if assert_is_type:
+        assert_or_throw(
+            isinstance(tp, type), TypeError(f"Can't find python type for {anno}")
+        )
     return tp
 
 
 def _is_tuple(anno: Any):
-    return hasattr(anno, "__origin__") and anno.__origin__ is tuple
+    return _get_origin_type(anno) is tuple
 
 
 def _is_union(anno: Any):
-    return hasattr(anno, "__origin__") and anno.__origin__ is Union
+    return _get_origin_type(anno, False) is Union
