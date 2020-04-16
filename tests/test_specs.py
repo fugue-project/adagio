@@ -1,7 +1,7 @@
 import json
 from typing import Callable, Tuple, cast
 
-from adagio.instances import ConfigVar, Input, Output, Task
+from adagio.instances import _ConfigVar, _Input, _Output, _Task
 from adagio.shells.interfaceless import function_to_taskspec
 from adagio.specs import ConfigSpec, InputSpec, OutputSpec, TaskSpec, WorkflowSpec
 from pytest import raises
@@ -15,11 +15,11 @@ def test_outputspec():
     # unknown type
     raises(TypeError, lambda: OutputSpec("a", "xyz", True))
 
-    o = OutputSpec("a", Task, True)
+    o = OutputSpec("a", _Task, True)
     x = MockTaskForVar()
     assert x is o.validate_value(x)
     assert o.validate_value(None) is None
-    o = OutputSpec("a", Task, False)
+    o = OutputSpec("a", _Task, False)
     x = MockTaskForVar()
     assert x is o.validate_value(x)
     raises(AssertionError, lambda: o.validate_value(None))
@@ -41,34 +41,34 @@ def test_inputspec():
 
     InputSpec("a", int, False, True, None, default_on_timeout=False)
     InputSpec("a", int, True, True, None, default_on_timeout=False)
-    s = InputSpec("a", Task, True, False, None)
+    s = InputSpec("a", _Task, True, False, None)
     raises(TypeError, lambda: s.validate_value(123))
     assert s.validate_value(None) is None
     t = MockTaskForVar()
     assert s.validate_value(t) is t
 
-    s = InputSpec("a", Task, True, True, None, default_on_timeout=False)
+    s = InputSpec("a", _Task, True, True, None, default_on_timeout=False)
     assert s.validate_value(None) is None
     t = MockTaskForVar()
     assert s.validate_value(t) is t
 
-    s = InputSpec("a", Task, False, True, None, default_on_timeout=False)
+    s = InputSpec("a", _Task, False, True, None, default_on_timeout=False)
     raises(AssertionError, lambda: s.validate_value(None))
     t = MockTaskForVar()
     assert s.validate_value(t) is t
 
-    s = InputSpec("a", Task, False, True, None, timeout=3, default_on_timeout=False)
+    s = InputSpec("a", _Task, False, True, None, timeout=3, default_on_timeout=False)
     assert 3 == s.timeout
     assert not s.default_on_timeout
-    o = OutputSpec("x", Task, True)
+    o = OutputSpec("x", _Task, True)
     raises(TypeError, lambda: s.validate_spec(o))  # nullable issue
-    o = OutputSpec("x", Task, False)
+    o = OutputSpec("x", _Task, False)
     assert o is s.validate_spec(o)
 
-    s = InputSpec("a", Task, True, True, None, timeout=3, default_on_timeout=False)
-    o = OutputSpec("x", Task, True)
+    s = InputSpec("a", _Task, True, True, None, timeout=3, default_on_timeout=False)
+    o = OutputSpec("x", _Task, True)
     assert o is s.validate_spec(o)
-    o = OutputSpec("x", Task, False)
+    o = OutputSpec("x", _Task, False)
     assert o is s.validate_spec(o)
 
 
@@ -226,7 +226,7 @@ def f2(a: int, b: int, c: str) -> str:
     return f"{a} {b} {c}"
 
 
-class MockTaskForVar(Task):
+class MockTaskForVar(_Task):
     def __init__(self):
         pass
 
