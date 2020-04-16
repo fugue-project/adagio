@@ -1,19 +1,27 @@
 import json
 from typing import Callable, cast
 
-from adagio.instances import ConfigVar, Input, Output, Task
-from adagio.specs import ConfigSpec, InputSpec, OutputSpec, TaskSpec
 from adagio.exceptions import SkippedError
+from adagio.instances import ConfigVar, Dependency, Input, Output, Task
+from adagio.specs import ConfigSpec, InputSpec, OutputSpec, TaskSpec
 from pytest import raises
 from triad.collections.dict import ParamDict
 from triad.utils.hash import to_uuid
+
+
+def test_dependency():
+    a = Dependency()
+    b = Dependency().set_dependency(a)
+    c = Dependency().set_dependency(b)
+    d = Dependency().set_dependency(c)
+    assert d.dependency is a
 
 
 def test_output():
     t = MockTaskForVar()
     s = OutputSpec("o", dict, False)
     o = Output(t, s)
-    assert to_uuid(t.__uuid__(), s.__uuid__()) == o.__uuid__()
+    assert to_uuid(t, s) == o.__uuid__()
     assert not o.is_set
     assert not o.is_skipped
     assert not o.is_successful
@@ -69,9 +77,6 @@ def test_input():
     i = Input(ii)
     i.set_dependency(o)
     raises(ValueError, lambda: o.set(None))
-    assert i.is_set
-    assert not i.is_successful
-    assert i.is_failed
     raises(ValueError, lambda: i.get())
 
     t = MockTaskForVar()
@@ -110,7 +115,7 @@ def test_input():
     i = Input(ii).set_dependency(o)
     raises(TimeoutError, lambda: i.get())
 
-    # Output skipped, input without default will raise error 
+    # Output skipped, input without default will raise error
     t = MockTaskForVar()
     s = OutputSpec("o", ParamDict, False)
     o = Output(t, s)
@@ -119,7 +124,7 @@ def test_input():
     i = Input(ii).set_dependency(o)
     o.skip()
     raises(SkippedError, lambda: i.get())
-    
+
     # Output skipped, input with default will return default
     t = MockTaskForVar()
     s = OutputSpec("o", ParamDict, False)
@@ -128,6 +133,18 @@ def test_input():
     ii = InputSpec("x", dict, False, False, p)
     i = Input(ii).set_dependency(o)
     o.skip()
+    assert p is i.get()
+
+    # Output -> workflow output -> Input
+    t = MockTaskForVar()
+    s = OutputSpec("o", ParamDict, False)
+    oo = Output(t, s)  # task output
+    o = Output(t, s)  # workflow output
+    o.set_dependency(oo)
+    p = ParamDict()
+    ii = InputSpec("x", dict, False)
+    i = Input(ii).set_dependency(o)
+    oo.set(p)
     assert p is i.get()
 
 
