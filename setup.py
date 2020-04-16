@@ -17,7 +17,7 @@ setup(
     author_email="goodwanghan@gmail.com",
     keywords="adagio dag directed acyclic graph",
     url="http://github.com/goodwanghan/adagio",
-    install_requires=["triad>=0.1.5", "typing>=3.7.4"],
+    install_requires=["triad>=0.1.5"],
     extras_require={},
     classifiers=[
         # "3 - Alpha", "4 - Beta" or "5 - Production/Stable"

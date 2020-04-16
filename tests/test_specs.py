@@ -227,5 +227,8 @@ def f2(a: int, b: int, c: str) -> str:
 
 
 class MockTaskForVar(Task):
+    def __init__(self):
+        pass
+
     def __uuid__(self) -> str:
         return "id"

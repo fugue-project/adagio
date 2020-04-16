@@ -90,6 +90,7 @@ def _try_parse(anno: Any) -> Optional[Dict[str, Any]]:
 
 
 def _get_origin_type(anno: Any, assert_is_type: bool = True) -> Any:
+    # this part looks weird but it's working for 3.6-3.8
     if anno is not None and anno.__module__ == "typing":
         if anno is Any:
             return object

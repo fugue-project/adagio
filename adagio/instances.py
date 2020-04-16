@@ -1,138 +1,153 @@
 from threading import Event
 from traceback import StackSummary, extract_stack
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from triad.utils.assertion import assert_or_throw
 from triad.utils.hash import to_uuid
-from adagio.specs import InputSpec, OutputSpec, ConfigSpec
+from adagio.specs import InputSpec, OutputSpec, ConfigSpec, TaskSpec
+from adagio.exceptions import SkippedError
 
 
 class Output(object):
     def __init__(self, task: "Task", spec: OutputSpec):
-        self._task = task
-        self._spec = spec
+        self.task = task
+        self.spec = spec
 
-        self._exception: Optional[Exception] = None
-        self._trace: Optional[StackSummary] = None
-        self._value_set = Event()
+        self.exception: Optional[Exception] = None
+        self.trace: Optional[StackSummary] = None
+        self.value_set = Event()
+        self.skipped = False
 
     def __repr__(self) -> str:
-        return f"{self._task}->{self._spec})"
+        return f"{self.task}->{self.spec})"
 
     def __uuid__(self) -> str:
-        return to_uuid(self._task.__uuid__(), self._spec.__uuid__())
+        return to_uuid(self.task.__uuid__(), self.spec.__uuid__())
 
-    def set(self, value: Any) -> None:
-        if not self._value_set.is_set():
+    def set(self, value: Any) -> "Output":
+        if not self.value_set.is_set():
             try:
-                self._value = self._spec.validate_value(value)
-                self._value_set.set()
+                self.value = self.spec.validate_value(value)
+                self.value_set.set()
             except Exception as e:
                 e = ValueError(str(e))
                 self.fail(e)
+        return self
 
     def fail(self, exception: Exception, trace: Optional[StackSummary] = None) -> None:
-        if not self._value_set.is_set():
-            self._exception = exception
-            self._trace = trace or extract_stack()
-            self._value_set.set()
+        if not self.value_set.is_set():
+            self.exception = exception
+            self.trace = trace or extract_stack()
+            self.value_set.set()
             raise exception
+
+    def skip(self) -> None:
+        if not self.value_set.is_set():
+            self.skipped = True
+            self.value_set.set()
 
     @property
     def is_set(self) -> bool:
-        return self._value_set.is_set()
+        return self.value_set.is_set()
 
     @property
     def is_successful(self) -> bool:
-        return self._exception is None and self._value_set.is_set()
+        return self.value_set.is_set() and not self.skipped and self.exception is None
 
     @property
     def is_failed(self) -> bool:
-        return self._exception is not None and self._value_set.is_set()
+        return self.value_set.is_set() and self.exception is not None
+
+    @property
+    def is_skipped(self) -> bool:
+        return self.value_set.is_set() and self.skipped
 
 
 class Input(object):
-    def __init__(self, spec: InputSpec, output: Output):
-        self._output = output
-        self._spec = spec
+    def __init__(self, spec: InputSpec):
+        self.spec = spec
 
     def __repr__(self) -> str:
-        return f"{self._output}->{self._spec})"
+        return f"{self.output}->{self.spec})"
 
     def __uuid__(self) -> str:
-        return to_uuid(self._output.__uuid__(), self._spec.__uuid__())
+        return to_uuid(self.output.__uuid__(), self.spec.__uuid__())
+
+    def set_dependency(self, output: Union["Input", Output]) -> "Input":
+        self.spec.validate_spec(output.spec)
+        self.output = output
+        return self
 
     def get(self) -> Any:
-        if not self._output._value_set.wait(self._spec.timeout):
-            if self._spec.default_on_timeout and not self._spec.required:
-                return self._spec.default_value
+        if isinstance(self.output, Input):
+            return self.output.get()
+        if not self.output.value_set.wait(self.spec.timeout):
+            if self.spec.default_on_timeout and not self.spec.required:
+                return self.spec.default_value
             raise TimeoutError(
-                f"Unable to get value in {self._spec.timeout} seconds from {self}"
+                f"Unable to get value in {self.spec.timeout} seconds from {self}"
             )
-        if self._output._exception is not None:
-            raise self._output._exception
+        if self.output.exception is not None:
+            raise self.output.exception
+        elif self.output.is_skipped:
+            if not self.spec.required:
+                return self.spec.default_value
+            raise SkippedError(f"{self.output} was skipped")
         else:
-            return self._output._value
+            return self.output.value
 
     @property
     def is_set(self) -> bool:
-        return self._output.is_set
+        return self.output.is_set
 
     @property
     def is_successful(self) -> bool:
-        return self._output.is_successful
+        return self.output.is_successful
 
     @property
     def is_failed(self) -> bool:
-        return self._output.is_failed
+        return self.output.is_failed
+
+    @property
+    def is_skipped(self) -> bool:
+        return self.output.is_skipped
 
 
 class ConfigVar(object):
     def __init__(self, spec: ConfigSpec):
-        self._is_set = False
-        self._value: Any = None
-        self._spec = spec
+        self.is_set = False
+        self.value: Any = None
+        self.spec = spec
 
     def __repr__(self) -> str:
-        return f"{self._spec}: {self._value}"
+        return f"{self.spec}: {self.value}"
 
     def __uuid__(self) -> str:
-        return to_uuid(self._value, self._spec.__uuid__())
+        return to_uuid(self.value, self.spec.__uuid__())
 
     def set(self, value: Any):
         if isinstance(value, ConfigVar):
-            self._spec.validate_spec(value._spec)
-            self._value = value
+            self.spec.validate_spec(value.spec)
+            self.value = value
         else:
-            self._value = self._spec.validate_value(value)
-        self._is_set = True
+            self.value = self.spec.validate_value(value)
+        self.is_set = True
 
     def get(self) -> Any:
-        if not self._is_set:
-            assert_or_throw(not self._spec.required, f"{self} is required but not set")
-            return self._spec.default_value
-        if isinstance(self._value, ConfigVar):
-            return self._value.get()
-        return self._value
-
-
-class ConfigCollection(object):
-    pass
-
-
-class InputCollection(object):
-    pass
-
-
-class OutputCollection(object):
-    def set_value(self, key: str, value: object) -> None:
-        pass
-
-    def get_value(self, key: str, timeout: Any) -> Any:
-        # delta = to_timedelta(timeout)
-        pass
+        if not self.is_set:
+            assert_or_throw(not self.spec.required, f"{self} is required but not set")
+            return self.spec.default_value
+        if isinstance(self.value, ConfigVar):
+            return self.value.get()
+        return self.value
 
 
 class Task(object):
+    def __init__(self, spec: TaskSpec):
+        self.spec = spec
+        self.configs = {v.name: ConfigVar(v) for v in spec.configs.values()}
+        self.inputs = {v.name: Input(v) for v in spec.inputs.values()}
+        self.outputs = {v.name: Output(self, v) for v in spec.outputs.values()}
+
     def __uuid__(self) -> str:
-        raise NotImplementedError
+        return to_uuid(self.spec, self.configs, self.inputs, self.outputs)
