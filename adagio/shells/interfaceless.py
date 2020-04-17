@@ -2,8 +2,10 @@ import inspect
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union, get_type_hints
 
+from adagio.instances import TaskContext
 from adagio.specs import ConfigSpec, InputSpec, OutputSpec, TaskSpec
 from triad.utils.assertion import assert_or_throw
+from triad.utils.convert import to_function, get_full_type_path
 
 
 def function_to_taskspec(
@@ -52,9 +54,27 @@ def function_to_taskspec(
         a["name"] = f"_{n}"
         outputs.append(OutputSpec(**a))
         n += 1
+    metadata = dict(__interfaceless_func=get_full_type_path(func))
     return TaskSpec(
-        configs, inputs, outputs, func, {}, deterministic=deterministic, lazy=lazy
+        configs,
+        inputs,
+        outputs,
+        _interfaceless_wrapper,
+        metadata,
+        deterministic=deterministic,
+        lazy=lazy,
     )
+
+
+def _interfaceless_wrapper(ctx: TaskContext) -> None:
+    inputs = {k: v.get() for k, v in ctx.inputs.items()}
+    func = to_function(ctx.metadata.get_or_throw("__interfaceless_func", Any))
+    o = func(**inputs)
+    res = list(o) if isinstance(o, tuple) else [o]
+    n = 0
+    for o in ctx.outputs.values():
+        o.set(res[n])
+        n += 1
 
 
 def _parse_annotation(anno: Any) -> Dict[str, Any]:

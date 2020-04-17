@@ -171,7 +171,7 @@ def test_configvar():
     s2 = ConfigSpec("x", dict, False, False, p2)
     c2 = _ConfigVar(s2)
     assert p2 is c2.get()  # not set, use the defaut
-    c2.set(c)  # set parent
+    c2.set_dependency(c)  # set parent
     assert p is c2.get()  # get parent value
     p3 = ParamDict()
     c.set(p3)  # set on parent will change child get
