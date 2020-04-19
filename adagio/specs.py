@@ -271,7 +271,7 @@ class _WorkflowSpecNode(object):
                 )
                 self.task.inputs[k].validate_spec(self.workflow.inputs[t[0]])
             else:  # len(t) == 2
-                aot(t[0] != self.name, f"{v} tries to connect to self")
+                aot(t[0] != self.name, f"{v} tries to connect to self node {self.name}")
                 node = self.workflow.nodes[t[0]]
                 aot(
                     t[1] in node.task.outputs,
@@ -280,22 +280,19 @@ class _WorkflowSpecNode(object):
                 self.task.inputs[k].validate_spec(node.task.outputs[t[1]])
 
     def _validate_config(self):
-        name = self.name + " config"
-        ckeys = set(self.config.keys())
-        cdkeys = set(self.config_dependency.keys())
-        if len(ckeys.intersection(cdkeys)) > 0:
-            it = ckeys.intersection(cdkeys)
-            raise DependencyDefinitionError(
-                f"{name} has duplicated config defitions {it}"
-            )
-        ckeys.update(cdkeys)
-        if set(self.task.configs.keys()) != ckeys:
-            raise DependencyNotDefinedError(name, self.task.configs.keys(), ckeys)
-        for k, t in self.config_dependency.items():
-            aot(t in self.workflow.configs, f"{t} is not a config of the workflow")
-            self.task.configs[k].validate_spec(self.workflow.configs[t])
         for k, v in self.config.items():
             self.task.configs[k].validate_value(v)
+        defined = set(self.config.keys())
+        for k, t in self.config_dependency.items():
+            aot(k not in defined, f"can't redefine config {k} in node {self.name}")
+            defined.add(k)
+            aot(t in self.workflow.configs, f"{t} is not a config of the workflow")
+            self.task.configs[k].validate_spec(self.workflow.configs[t])
+        for k in set(self.task.configs.keys()).difference(defined):
+            aot(
+                not self.task.configs[k].required,
+                f"config {k} in node {self.name} is required but not defined",
+            )
 
 
 class WorkflowSpec(TaskSpec):
@@ -375,6 +372,14 @@ class WorkflowSpec(TaskSpec):
             raise DependencyNotDefinedError(
                 "workflow output", self.outputs.keys(), self.internal_dependency.keys()
             )
+
+
+def json_to_taskspec(json_str: str) -> TaskSpec:
+    d = json.loads(json_str)
+    if "nodes" in d:
+        return WorkflowSpec(**d)
+    else:
+        return TaskSpec(**d)
 
 
 def _no_op(self, *args, **kwargs):  # pragma: no cover
