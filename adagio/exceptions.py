@@ -1,3 +1,6 @@
+from typing import Iterable
+
+
 class AdagioError(Exception):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -6,6 +9,17 @@ class AdagioError(Exception):
 class CompileError(AdagioError):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+
+class DependencyDefinitionError(CompileError):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+class DependencyNotDefinedError(DependencyDefinitionError):
+    def __init__(self, name: str, expected: Iterable[str], actual: Iterable[str]):
+        s = f"expected {sorted(expected)}, actual {sorted(actual)}"
+        super().__init__(f"Task {name} dependencies not well defined: " + s)
 
 
 class SkippedError(AdagioError):

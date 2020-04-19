@@ -192,9 +192,15 @@ def _mock_task_func():
     pass
 
 
+class MockSpec(object):
+    @property
+    def deterministic(self):
+        return False
+
+
 class MockTaskForVar(_Task):
     def __init__(self):
-        pass
+        self.spec = MockSpec()
 
     def __uuid__(self) -> str:
         return "id"

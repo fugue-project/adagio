@@ -1,8 +1,9 @@
 import json
-from typing import Any, List, Set, Type, TypeVar
+from typing import Any, Dict, List, Optional, Type, TypeVar
 
+from adagio.exceptions import DependencyDefinitionError, DependencyNotDefinedError
 from triad.collections.dict import IndexedOrderedDict, ParamDict
-from triad.utils.assertion import assert_or_throw
+from triad.utils.assertion import assert_or_throw as aot
 from triad.utils.convert import (
     as_type,
     get_full_type_path,
@@ -29,21 +30,21 @@ class OutputSpec(object):
 
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
-            assert_or_throw(
+            aot(
                 isinstance(obj, self.data_type),
                 TypeError(f"{obj} mismatches type {self.paramdict}"),
             )
             return obj
-        assert_or_throw(self.nullable, f"Can't set None to {self}")
+        aot(self.nullable, f"Can't set None to {self}")
         return obj
 
     def validate_spec(self, spec: "OutputSpec") -> "OutputSpec":
         if not self.nullable:
-            assert_or_throw(
+            aot(
                 not spec.nullable,
                 TypeError(f"{self} - {spec} are not compatible on nullable"),
             )
-        assert_or_throw(
+        aot(
             issubclass(spec.data_type, self.data_type),
             TypeError(f"{self} - {spec} are not compatible on data_type"),
         )
@@ -81,20 +82,16 @@ class ConfigSpec(OutputSpec):
         self.required = required
         self.default_value = default_value
         if required:
-            assert_or_throw(
-                default_value is None, "required var can't have default_value"
-            )
+            aot(default_value is None, "required var can't have default_value")
         elif default_value is None:
-            assert_or_throw(
-                nullable, "default_value can't be None because it's not nullable"
-            )
+            aot(nullable, "default_value can't be None because it's not nullable")
         else:
             self.default_value = as_type(self.default_value, self.data_type)
 
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
             return super().validate_value(obj)
-        assert_or_throw(self.nullable, f"Can't set None to {self.paramdict}")
+        aot(self.nullable, f"Can't set None to {self.paramdict}")
         return obj
 
     @property
@@ -124,11 +121,9 @@ class InputSpec(ConfigSpec):
         super().__init__(name, data_type, nullable, required, default_value, metadata)
         self.timeout = to_timedelta(timeout).total_seconds()
         self.default_on_timeout = default_on_timeout
-        assert_or_throw(self.timeout >= 0, "timeout can't be negative")
+        aot(self.timeout >= 0, "timeout can't be negative")
         if required:
-            assert_or_throw(
-                not default_on_timeout, "default is not allowed for required input"
-            )
+            aot(not default_on_timeout, "default is not allowed for required input")
 
     @property
     def attributes(self) -> List[str]:
@@ -202,86 +197,105 @@ class TaskSpec(object):
             return obj
         if isinstance(obj, str):
             obj = json.loads(obj)
-        assert_or_throw(isinstance(obj, dict), f"{obj} is not dict")
+        aot(isinstance(obj, dict), f"{obj} is not dict")
         return to_type(**obj)
 
     def _parse_spec_collection(
         self, obj: Any, to_type: Type[T]
     ) -> IndexedOrderedDict[str, T]:
         res: IndexedOrderedDict[str, T] = IndexedOrderedDict()
-        assert_or_throw(isinstance(obj, List), "Spec collection must be a list")
+        aot(isinstance(obj, List), "Spec collection must be a list")
         for v in obj:
             s = self._parse_spec(v, to_type)
-            assert_or_throw(s.name not in res, KeyError(f"Duplicated key {s.name}"))
+            aot(s.name not in res, KeyError(f"Duplicated key {s.name}"))
             res[s.name] = s
         return res
 
 
 class _WorkflowSpecNode(object):
     def __init__(
-        self, workflow: "WorkflowSpec", name: str, task: TaskSpec, links: List[str]
+        self,
+        workflow: "WorkflowSpec",
+        name: str,
+        task: Any,
+        dependency: Optional[Dict[str, str]],
+        config: Optional[Dict[str, Any]],
+        config_dependency: Optional[Dict[str, str]],
     ):
+        if isinstance(task, TaskSpec):
+            _t: TaskSpec = task
+        elif isinstance(task, dict):
+            _t = TaskSpec(**task)
+        else:  # pragma: no cover
+            raise TypeError(f"{task} is not a valid TaskSpec")
         self.workflow = workflow
         self.name = assert_triad_var_name(name)
-        self.task = task
-        self.links: List[str] = []
-        self._linked: Set[str] = set()
-        for l in links:
-            self._link(l)
+        self.task = _t
+        self.dependency = dependency or {}
+        self.config = config or {}
+        self.config_dependency = config_dependency or {}
+        try:
+            self._validate_config()
+            self._validate_dependency()
+        except DependencyDefinitionError:
+            raise
+        except Exception as e:
+            raise DependencyDefinitionError(e)
 
     def __uuid__(self) -> str:
-        return to_uuid(self.name, self.task, sorted(self.links))
-
-    def _link(self, expr: str) -> None:
-        e = expr.split(",", 1)
-        from_expr, to_expr = e[0], e[1]
-        assert_or_throw(from_expr not in self._linked, f"{from_expr} is already linked")
-        f = from_expr.split(".", 1)
-        t = to_expr.split(".", 1)
-        if f[0] == "input":
-            assert_or_throw(
-                f[1] in self.task.inputs, f"{f[1]} is not an input of {self.task}"
-            )
-            if len(t) == 1:
-                assert_or_throw(
-                    t[0] in self.workflow.inputs,
-                    f"{t[0]} is not an input of the workflow",
-                )
-                self.task.inputs[f[1]].validate_spec(self.workflow.inputs[t[0]])
-            else:  # len(t) == 2
-                assert_or_throw(
-                    t[0] != self.name, f"{to_expr} tries to connect to self"
-                )
-                node = self.workflow.nodes[t[0]]
-                assert_or_throw(
-                    t[1] in node.task.outputs, f"{t[1]} is not an output of {node}"
-                )
-                self.task.inputs[f[1]].validate_spec(node.task.outputs[t[1]])
-        elif f[0] == "config":
-            assert_or_throw(
-                f[1] in self.task.configs, f"{f[1]} is not a config of {self.task}"
-            )
-            assert_or_throw(
-                to_expr in self.workflow.configs,
-                f"{to_expr} is not a config of the workflow",
-            )
-            self.task.configs[f[1]].validate_spec(self.workflow.configs[to_expr])
-        else:
-            raise SyntaxError(f"{from_expr} is an invalid expression")
-        self._linked.add(from_expr)
-        self.links.append(expr)
+        return to_uuid(
+            self.name, self.task, self.dependency, self.config, self.config_dependency
+        )
 
     @property
     def jsondict(self) -> ParamDict:
-        return dict(name=self.name, task=self.task.jsondict, links=self.links)
-
-    def validate(self) -> None:
-        defined = set(  # noqa: C401
-            x.split(".")[1] for x in self._linked if x.startswith("input.")
+        return dict(
+            name=self.name,
+            task=self.task.jsondict,
+            dependency=self.dependency,
+            config=self.config,
+            config_dependency=self.config_dependency,
         )
-        expected = set(self.task.inputs.keys())
-        diff = expected.difference(defined)
-        assert_or_throw(len(diff) == 0, f"Inputs {diff} are not linked")
+
+    def _validate_dependency(self):
+        if set(self.dependency.keys()) != set(self.task.inputs.keys()):
+            raise DependencyNotDefinedError(
+                self.name + " input", self.task.inputs.keys(), self.dependency.keys()
+            )
+        for k, v in self.dependency.items():
+            t = v.split(".", 1)
+            if len(t) == 1:
+                aot(
+                    t[0] in self.workflow.inputs,
+                    f"{t[0]} is not an input of the workflow",
+                )
+                self.task.inputs[k].validate_spec(self.workflow.inputs[t[0]])
+            else:  # len(t) == 2
+                aot(t[0] != self.name, f"{v} tries to connect to self")
+                node = self.workflow.nodes[t[0]]
+                aot(
+                    t[1] in node.task.outputs,
+                    f"{t[1]} is not an output of node {node.name}",
+                )
+                self.task.inputs[k].validate_spec(node.task.outputs[t[1]])
+
+    def _validate_config(self):
+        name = self.name + " config"
+        ckeys = set(self.config.keys())
+        cdkeys = set(self.config_dependency.keys())
+        if len(ckeys.intersection(cdkeys)) > 0:
+            it = ckeys.intersection(cdkeys)
+            raise DependencyDefinitionError(
+                f"{name} has duplicated config defitions {it}"
+            )
+        ckeys.update(cdkeys)
+        if set(self.task.configs.keys()) != ckeys:
+            raise DependencyNotDefinedError(name, self.task.configs.keys(), ckeys)
+        for k, t in self.config_dependency.items():
+            aot(t in self.workflow.configs, f"{t} is not a config of the workflow")
+            self.task.configs[k].validate_spec(self.workflow.configs[t])
+        for k, v in self.config.items():
+            self.task.configs[k].validate_value(v)
 
 
 class WorkflowSpec(TaskSpec):
@@ -293,6 +307,8 @@ class WorkflowSpec(TaskSpec):
         metadata=None,
         deterministic: bool = True,
         lazy: bool = True,
+        nodes: Optional[List[Any]] = None,
+        internal_dependency: Optional[Dict[str, str]] = None,
     ):
         super().__init__(
             configs,
@@ -304,56 +320,61 @@ class WorkflowSpec(TaskSpec):
             lazy=lazy,
         )
         self.nodes: IndexedOrderedDict[str, _WorkflowSpecNode] = {}
-        self.links: List[str] = []
-        self._linked: Set[str] = set()
+        self.internal_dependency: Dict[str, str] = {}
+        if nodes is not None:
+            for n in nodes:
+                self.add_task(**n)
+        if internal_dependency is not None:
+            for k, v in internal_dependency.items():
+                self.link(k, v)
 
     def __uuid__(self) -> str:
-        return to_uuid(super().__uuid__(), self.nodes, sorted(self.links))
+        return to_uuid(super().__uuid__(), self.nodes, self.internal_dependency)
 
     def add_task(
-        self, name: str, task: TaskSpec, links: List[str]
+        self,
+        name: str,
+        task: Any,
+        dependency: Optional[Dict[str, str]] = None,
+        config: Optional[Dict[str, Any]] = None,
+        config_dependency: Optional[Dict[str, str]] = None,
     ) -> _WorkflowSpecNode:
-        assert_or_throw(
-            name not in self.nodes, KeyError(f"{name} already exists in workflow")
+        aot(name not in self.nodes, KeyError(f"{name} already exists in workflow"))
+        node = _WorkflowSpecNode(
+            self, name, task, dependency, config, config_dependency
         )
-        node = _WorkflowSpecNode(self, name, task, links)
         self.nodes[name] = node
         return node
 
-    def link(self, expr: str):
-        e = expr.split(",", 1)
-        f, to_expr = e[0], e[1]
-        assert_or_throw(f not in self._linked, f"{f} is already linked")
-        t = to_expr.split(".", 1)
-        assert_or_throw(f in self.outputs, f"{f} is not an output of the workflow")
-        if len(t) == 1:
-            assert_or_throw(
-                t[0] in self.inputs, f"{t[0]} is not an input of the workflow"
-            )
-            self.outputs[f].validate_spec(self.inputs[t[0]])
-        else:  # len(t) == 2
-            node = self.nodes[t[0]]
-            assert_or_throw(
-                t[1] in node.task.outputs, f"{t[1]} is not an output of {node}"
-            )
-            self.outputs[f].validate_spec(node.task.outputs[t[1]])
-        self._linked.add(f)
-        self.links.append(expr)
+    def link(self, output: str, to_expr: str):
+        try:
+            aot(output in self.outputs, f"{output} is not an output of the workflow")
+            aot(output not in self.internal_dependency, f"{output} is already defined")
+            t = to_expr.split(".", 1)
+            if len(t) == 1:
+                aot(t[0] in self.inputs, f"{t[0]} is not an input of the workflow")
+                self.outputs[output].validate_spec(self.inputs[t[0]])
+            else:  # len(t) == 2
+                node = self.nodes[t[0]]
+                aot(t[1] in node.task.outputs, f"{t[1]} is not an output of {node}")
+                self.outputs[output].validate_spec(node.task.outputs[t[1]])
+            self.internal_dependency[output] = to_expr
+        except Exception as e:
+            raise DependencyDefinitionError(e)
 
     @property
     def jsondict(self) -> ParamDict:
         d = super().jsondict
         d["nodes"] = [x.jsondict for x in self.nodes.values()]
-        d["links"] = self.links
+        d["internal_dependency"] = self.internal_dependency
+        del d["func"]
         return d
 
     def validate(self) -> None:
-        for n in self.nodes.values():
-            n.validate()
-        defined = set(self._linked)
-        expected = set(self.outputs.keys())
-        diff = expected.difference(defined)
-        assert_or_throw(len(diff) == 0, f"Outputs {diff} are not linked")
+        if set(self.outputs.keys()) != set(self.internal_dependency.keys()):
+            raise DependencyNotDefinedError(
+                "workflow output", self.outputs.keys(), self.internal_dependency.keys()
+            )
 
 
 def _no_op(self, *args, **kwargs):  # pragma: no cover
