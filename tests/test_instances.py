@@ -2,10 +2,12 @@ import json
 from typing import Callable, cast
 
 from adagio.exceptions import SkippedError
-from adagio.instances import _ConfigVar, _Dependency, _Input, _Output, _Task
+from adagio.instances import (_ConfigVar, _Dependency, _DependencyDict, _Input,
+                              _Output, _Task)
 from adagio.specs import ConfigSpec, InputSpec, OutputSpec, TaskSpec
 from pytest import raises
-from triad.collections.dict import ParamDict
+from triad.collections.dict import IndexedOrderedDict, ParamDict
+from triad.exceptions import InvalidOperationError
 from triad.utils.hash import to_uuid
 
 
@@ -177,6 +179,33 @@ def test_configvar():
     c.set(p3)  # set on parent will change child get
     assert p3 is c.get()
     assert p3 is c2.get()
+
+
+def test_dependencydict():
+    s = ConfigSpec("a", int, True, False, 1)
+    c1 = _ConfigVar(s)
+    s = ConfigSpec("b", int, True, False, 2)
+    c2 = _ConfigVar(s)
+    d = _DependencyDict(IndexedOrderedDict([("a", c1), ("b", c2)]))
+    assert 2 == len(d)
+    assert 1 == d["a"]
+    assert 2 == d["b"]
+    c2.set(3)
+    assert 3 == d["b"]
+    assert [("a", 1), ("b", 3)] == list(d.items())
+    with raises(InvalidOperationError):
+        d["c"] = 1
+    with raises(InvalidOperationError):
+        d["b"] = 1
+    with raises(InvalidOperationError):
+        d.update(dict())
+    assert 3 == d["b"]
+    assert "3" == d.get_or_throw("b", str)
+    assert "3" == d.get("b", "x")
+    assert 0 == d.get("d", 0)
+    with raises(KeyError):
+        d.get_or_throw("d", str)
+    
 
 
 def _dummy(a: int, b: str) -> float:

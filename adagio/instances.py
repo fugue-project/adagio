@@ -1,6 +1,7 @@
-from threading import Event
+from threading import Event, RLock
 from traceback import StackSummary, extract_stack
-from typing import Any, Optional
+from typing import Any, Iterable, Optional, Tuple
+from uuid import uuid4
 
 from adagio.cache import NO_OP_CACHE, WorkflowResultCache
 from adagio.exceptions import SkippedError
@@ -15,7 +16,57 @@ from adagio.specs import (
 from triad.collections.dict import IndexedOrderedDict, ParamDict
 from triad.utils.assertion import assert_or_throw
 from triad.utils.hash import to_uuid
-from uuid import uuid4
+
+
+class TaskContext(object):
+    def __init__(self, task: "_Task"):
+        self._task = task
+        self._configs = _DependencyDict(self._task.configs)
+        self._inputs = _DependencyDict(self._task.inputs)
+
+    def ensure_all_ready(self):
+        """This is a blocking call to wait for all config values
+        and input dependencies are to be set by upstreams.
+        """
+        for c in self._task.configs.values():
+            c.get()
+        for i in self._task.inputs.values():
+            i.get()
+
+    @property
+    def configs(self) -> ParamDict:
+        """Dictionary of config values. It's lazy, only when a certain key
+        is requested, it will block the requesting thread until that
+        key's value is ready.
+        """
+        return self._configs
+
+    @property
+    def inputs(self) -> ParamDict:
+        """Dictionary of input dependencies. It's lazy, only when a certain key
+        is requested, it will block the requesting thread until that
+        key's value is ready.
+        """
+        return self._inputs
+
+    @property
+    def outputs(self) -> IndexedOrderedDict[str, "_Output"]:
+        """Dictionary of outputs. For outputs in the spec but you don't set,
+        the framework will set them to `skipped`
+        """
+        return self._task.outputs
+
+    @property
+    def metadata(self) -> ParamDict:
+        """Metadata of the task
+        """
+        return self.spec.metadata
+
+    @property
+    def spec(self) -> TaskSpec:
+        """Spec of the task
+        """
+        return self._task.spec
 
 
 class _Dependency(object):
@@ -43,6 +94,8 @@ class _Output(_Dependency):
         self.value_set = Event()
         self.skipped = False
 
+        self._lock = RLock()
+
     def __repr__(self) -> str:
         return f"{self.task}->{self.spec})"
 
@@ -50,30 +103,33 @@ class _Output(_Dependency):
         return to_uuid(self.task, self.spec)
 
     def set(self, value: Any) -> "_Output":
-        if not self.value_set.is_set():
-            try:
-                self.value = self.spec.validate_value(value)
-                if self.task.spec.deterministic:
-                    self.task.cache.set(self.__uuid__(), self.value)
-                self.value_set.set()
-            except Exception as e:
-                e = ValueError(str(e))
-                self.fail(e)
-        return self
+        with self._lock:
+            if not self.value_set.is_set():
+                try:
+                    self.value = self.spec.validate_value(value)
+                    if self.task.spec.deterministic:
+                        self.task.cache.set(self.__uuid__(), self.value)
+                    self.value_set.set()
+                except Exception as e:
+                    e = ValueError(str(e))
+                    self.fail(e)
+            return self
 
     def fail(self, exception: Exception, trace: Optional[StackSummary] = None) -> None:
-        if not self.value_set.is_set():
-            self.exception = exception
-            self.trace = trace or extract_stack()
-            self.value_set.set()
-            raise exception
+        with self._lock:
+            if not self.value_set.is_set():
+                self.exception = exception
+                self.trace = trace or extract_stack()
+                self.value_set.set()
+                raise exception
 
     def skip(self) -> None:
-        if not self.value_set.is_set():
-            self.skipped = True
-            if self.task.spec.deterministic:
-                self.task.cache.skip(self.__uuid__())
-            self.value_set.set()
+        with self._lock:
+            if not self.value_set.is_set():
+                self.skipped = True
+                if self.task.spec.deterministic:
+                    self.task.cache.skip(self.__uuid__())
+                self.value_set.set()
 
     @property
     def is_set(self) -> bool:
@@ -186,25 +242,19 @@ class _ConfigVar(_Dependency):
         self.spec.validate_spec(other.spec)  # type:ignore
 
 
-class TaskContext(object):
-    def __init__(self, task: "_Task"):
-        self._task = task
+class _DependencyDict(ParamDict):
+    def __init__(self, data: IndexedOrderedDict[str, _Dependency]):
+        super().__init__()
+        for k, v in data.items():
+            super().__setitem__(k, v)
+        self.set_readonly()
 
-    @property
-    def configs(self) -> IndexedOrderedDict[str, _ConfigVar]:
-        return self._task.configs
+    def __getitem__(self, key: str) -> Any:
+        return super().__getitem__(key).get()
 
-    @property
-    def inputs(self) -> IndexedOrderedDict[str, _Input]:
-        return self._task.configs
-
-    @property
-    def outputs(self) -> IndexedOrderedDict[str, _Output]:
-        return self._task.configs
-
-    @property
-    def metadata(self) -> ParamDict:
-        return self._task.spec.metadata
+    def items(self) -> Iterable[Tuple[str, Any]]:
+        for k in self.keys():
+            yield k, self[k]
 
 
 class _Task(object):
@@ -214,12 +264,15 @@ class _Task(object):
         self.configs = IndexedOrderedDict(
             (v.name, _ConfigVar(v)) for v in spec.configs.values()
         )
+        self.configs.set_readonly()
         self.inputs = IndexedOrderedDict(
             (v.name, _Input(v)) for v in spec.inputs.values()
         )
+        self.inputs.set_readonly()
         self.outputs = IndexedOrderedDict(
             (v.name, _Output(self, v)) for v in spec.outputs.values()
         )
+        self.outputs.set_readonly()
         self._id = str(uuid4())
 
     def __uuid__(self) -> str:
@@ -260,8 +313,6 @@ class _WorkflowNode(object):
             self.task: "_Task" = _Workflow(spec.task, workflow.cache)
         else:
             self.task = _Task(spec.task, workflow.cache)
-        for l in spec.links:
-            self.link(l)
 
     def __uuid__(self) -> str:
         return self.task.__uuid__()
@@ -287,8 +338,6 @@ class _Workflow(_Task):
         self.nodes = IndexedOrderedDict()
         for k, v in spec.nodes.items():
             self.nodes[k] = _WorkflowNode(v, self)
-        for l in spec.links:
-            self.link(l)
 
     def __uuid__(self) -> str:
         return to_uuid(self.spec, self.configs, self.inputs, self.nodes)

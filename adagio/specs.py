@@ -21,6 +21,7 @@ class OutputSpec(object):
         self.data_type = to_type(data_type)
         self.nullable = nullable
         self.metadata = ParamDict(metadata, deep=True)
+        self.metadata.set_readonly()
 
     def __uuid__(self) -> str:
         return to_uuid([self.__dict__[x] for x in self.attributes])
