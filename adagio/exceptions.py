@@ -6,6 +6,11 @@ class AdagioError(Exception):
         super().__init__(*args, **kwargs)
 
 
+class WorkflowBug(AdagioError):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
 class CompileError(AdagioError):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -22,7 +27,17 @@ class DependencyNotDefinedError(DependencyDefinitionError):
         super().__init__(f"Task {name} dependencies not well defined: " + s)
 
 
-class SkippedError(AdagioError):
+class WorkflowRuntimeError(AdagioError):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+class AbortedError(WorkflowRuntimeError):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+class SkippedError(WorkflowRuntimeError):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

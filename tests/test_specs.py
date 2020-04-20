@@ -247,6 +247,7 @@ class MockSpec(object):
 
 class MockTaskForVar(_Task):
     def __init__(self):
+        self.name = "taskname"
         self.spec = MockSpec()
 
     def __uuid__(self) -> str:

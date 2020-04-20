@@ -76,7 +76,7 @@ def test_input():
     o = _Output(t, s)
     p = ParamDict()
     ii = InputSpec("x", dict, False, False, default_value=p, default_on_timeout=True)
-    i = _Input(ii)
+    i = _Input(t, ii)
     i.set_dependency(o)
     raises(ValueError, lambda: o.set(None))
     raises(ValueError, lambda: i.get())
@@ -97,13 +97,13 @@ def test_input():
     p2 = ParamDict()
     ii = InputSpec("x", dict, False, False, timeout="0.1s",
                    default_value=p, default_on_timeout=True)
-    i = _Input(ii).set_dependency(o)
+    i = _Input(t, ii).set_dependency(o)
     assert p is i.get()
     o.set(p2)
     assert p is not i.get()
     assert p2 is i.get()
     # Input linked with Input
-    i2 = _Input(ii).set_dependency(i)
+    i2 = _Input(t, ii).set_dependency(i)
     assert p is not i2.get()
     assert p2 is i2.get()
 
@@ -114,7 +114,7 @@ def test_input():
     p2 = ParamDict()
     ii = InputSpec("x", dict, False, False, timeout="0.1s",
                    default_value=p, default_on_timeout=False)
-    i = _Input(ii).set_dependency(o)
+    i = _Input(t, ii).set_dependency(o)
     raises(TimeoutError, lambda: i.get())
 
     # Output skipped, input without default will raise error
@@ -123,7 +123,7 @@ def test_input():
     o = _Output(t, s)
     p = ParamDict()
     ii = InputSpec("x", dict, False)
-    i = _Input(ii).set_dependency(o)
+    i = _Input(t, ii).set_dependency(o)
     o.skip()
     raises(SkippedError, lambda: i.get())
 
@@ -133,7 +133,7 @@ def test_input():
     o = _Output(t, s)
     p = ParamDict()
     ii = InputSpec("x", dict, False, False, p)
-    i = _Input(ii).set_dependency(o)
+    i = _Input(t, ii).set_dependency(o)
     o.skip()
     assert p is i.get()
 
@@ -145,33 +145,34 @@ def test_input():
     o.set_dependency(oo)
     p = ParamDict()
     ii = InputSpec("x", dict, False)
-    i = _Input(ii).set_dependency(o)
+    i = _Input(t, ii).set_dependency(o)
     oo.set(p)
     assert p is i.get()
 
 
 def test_configvar():
+    t = MockTaskForVar()
     s = ConfigSpec("a", dict, True, True, None)
-    c = _ConfigVar(s)
+    c = _ConfigVar(t, s)
     raises(AssertionError, lambda: c.get())  # required not set
 
     p = ParamDict()
     s = ConfigSpec("a", dict, True, False, p)
-    c = _ConfigVar(s)
+    c = _ConfigVar(t, s)
     assert p is c.get()
     c.set(None)
     assert c.get() is None
 
     p = ParamDict()
     s = ConfigSpec("a", ParamDict, False, False, p)
-    c = _ConfigVar(s)
+    c = _ConfigVar(t, s)
     assert p is c.get()
     raises(AssertionError, lambda: c.set(None))
     assert p is c.get()
 
     p2 = ParamDict()
     s2 = ConfigSpec("x", dict, False, False, p2)
-    c2 = _ConfigVar(s2)
+    c2 = _ConfigVar(t, s2)
     assert p2 is c2.get()  # not set, use the defaut
     c2.set_dependency(c)  # set parent
     assert p is c2.get()  # get parent value
@@ -182,10 +183,11 @@ def test_configvar():
 
 
 def test_dependencydict():
+    t = MockTaskForVar()
     s = ConfigSpec("a", int, True, False, 1)
-    c1 = _ConfigVar(s)
+    c1 = _ConfigVar(t, s)
     s = ConfigSpec("b", int, True, False, 2)
-    c2 = _ConfigVar(s)
+    c2 = _ConfigVar(t, s)
     d = _DependencyDict(IndexedOrderedDict([("a", c1), ("b", c2)]))
     assert 2 == len(d)
     assert 1 == d["a"]
@@ -205,7 +207,6 @@ def test_dependencydict():
     assert 0 == d.get("d", 0)
     with raises(KeyError):
         d.get_or_throw("d", str)
-    
 
 
 def _dummy(a: int, b: str) -> float:
@@ -230,6 +231,7 @@ class MockSpec(object):
 class MockTaskForVar(_Task):
     def __init__(self):
         self.spec = MockSpec()
+        self.name = "taskname"
 
     def __uuid__(self) -> str:
         return "id"
