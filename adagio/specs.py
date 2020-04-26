@@ -205,6 +205,8 @@ class TaskSpec(object):
         self, obj: Any, to_type: Type[T]
     ) -> IndexedOrderedDict[str, T]:
         res: IndexedOrderedDict[str, T] = IndexedOrderedDict()
+        if obj is None:
+            return res
         aot(isinstance(obj, List), "Spec collection must be a list")
         for v in obj:
             s = self._parse_spec(v, to_type)
@@ -299,9 +301,9 @@ class _WorkflowSpecNode(object):
 class WorkflowSpec(TaskSpec):
     def __init__(
         self,
-        configs: Any,
-        inputs: Any,
-        outputs: Any,
+        configs: Any = None,
+        inputs: Any = None,
+        outputs: Any = None,
         metadata=None,
         deterministic: bool = True,
         lazy: bool = True,

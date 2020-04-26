@@ -67,13 +67,13 @@ def function_to_taskspec(
 
 
 def _interfaceless_wrapper(ctx: TaskContext) -> None:
-    inputs = {k: v.get() for k, v in ctx.inputs.items()}
-    func = to_function(ctx.metadata.get_or_throw("__interfaceless_func", Any))
-    o = func(**inputs)
+    ctx.ensure_all_ready()
+    func = to_function(ctx.metadata.get_or_throw("__interfaceless_func", object))
+    o = func(**ctx.inputs, **ctx.configs)
     res = list(o) if isinstance(o, tuple) else [o]
     n = 0
-    for o in ctx.outputs.values():
-        o.set(res[n])
+    for k in ctx.outputs.keys():
+        ctx.outputs[k] = res[n]
         n += 1
 
 
