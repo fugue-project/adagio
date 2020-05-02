@@ -19,14 +19,7 @@ from typing import (
 from uuid import uuid4
 
 from adagio.exceptions import AbortedError, SkippedError, WorkflowBug
-from adagio.specs import (
-    ConfigSpec,
-    InputSpec,
-    OutputSpec,
-    TaskSpec,
-    WorkflowSpec,
-    _WorkflowSpecNode,
-)
+from adagio.specs import ConfigSpec, InputSpec, OutputSpec, TaskSpec, WorkflowSpec
 from triad.collections.dict import IndexedOrderedDict, ParamDict
 from triad.exceptions import InvalidOperationError
 from triad.utils.assertion import assert_or_throw as aot
@@ -488,10 +481,10 @@ class _OutputDict(ParamDict):
     def __setitem__(self, key: str, value: Any) -> None:
         super().__getitem__(key).set(value)
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> Any:  # pragma: no cover
         raise InvalidOperationError("Can't get items from outputs")
 
-    def items(self) -> Iterable[Tuple[str, Any]]:
+    def items(self) -> Iterable[Tuple[str, Any]]:  # pragma: no cover
         raise InvalidOperationError("Can't get items from outputs")
 
 
@@ -527,7 +520,6 @@ T = TypeVar("T", bound=Union[_ConfigVar, _Input, _Output])
 class _Task(object):
     def __init__(
         self,
-        name: str,
         spec: TaskSpec,
         ctx: WorkflowContext,
         parent_workflow: Optional["_Workflow"] = None,
@@ -537,7 +529,6 @@ class _Task(object):
         self._trace: Optional[StackSummary] = None
 
         self.parent_workflow = parent_workflow
-        self.name = name
         self.ctx = ctx
         self.spec = spec
         self.configs = self._make_dict(spec.configs.values(), _ConfigVar)
@@ -555,6 +546,10 @@ class _Task(object):
 
     def __hash__(self) -> int:
         return hash(self.__uuid__())
+
+    @property
+    def name(self) -> str:
+        return self.spec.name
 
     @property
     def deterministic(self) -> bool:
@@ -693,24 +688,23 @@ class _Task(object):
 class _Workflow(_Task):
     def __init__(
         self,
-        name: str,
         spec: WorkflowSpec,
         ctx: WorkflowContext,
         parent_workflow: Optional["_Workflow"] = None,
     ):
-        super().__init__(name, spec, ctx, parent_workflow)
+        super().__init__(spec, ctx, parent_workflow)
         self.tasks = IndexedOrderedDict()
 
     def _init_tasks(self):
-        for k, v in self.spec.nodes.items():
+        for k, v in self.spec.tasks.items():
             self.tasks[k] = self._build_task(v)
         self._set_outputs()
 
-    def _build_task(self, spec: _WorkflowSpecNode) -> _Task:
-        if isinstance(spec.task, WorkflowSpec):
-            task: _Task = _Workflow(spec.name, spec.task, self.ctx, self)
+    def _build_task(self, spec: TaskSpec) -> _Task:
+        if isinstance(spec, WorkflowSpec):
+            task: _Task = _Workflow(spec, self.ctx, self)
         else:
-            task = _Task(spec.name, spec.task, self.ctx, self)
+            task = _Task(spec, self.ctx, self)
         self._set_configs(task, spec)
         self._set_inputs(task, spec)
         if isinstance(task, _Workflow):
@@ -718,18 +712,18 @@ class _Workflow(_Task):
             task._init_tasks()
         return task
 
-    def _set_inputs(self, task: _Task, spec: _WorkflowSpecNode) -> None:
-        for f, to_expr in spec.dependency.items():
+    def _set_inputs(self, task: _Task, spec: TaskSpec) -> None:
+        for f, to_expr in spec.node_spec.dependency.items():
             t = to_expr.split(".", 1)
             if len(t) == 1:
                 task.inputs[f].set_dependency(self.inputs[t[0]])
             else:
                 task.inputs[f].set_dependency(self.tasks[t[0]].outputs[t[1]])
 
-    def _set_configs(self, task: _Task, spec: _WorkflowSpecNode) -> None:
-        for f, v in spec.config.items():
+    def _set_configs(self, task: _Task, spec: TaskSpec) -> None:
+        for f, v in spec.node_spec.config.items():
             task.configs[f].set(v)
-        for f, t in spec.config_dependency.items():
+        for f, t in spec.node_spec.config_dependency.items():
             task.configs[f].set_dependency(self.configs[t])
 
     def _set_outputs(self) -> None:
@@ -781,7 +775,7 @@ def _make_top_level_workflow(
         len(spec.inputs) == 0,
         InvalidOperationError("Can't have inputs for top level workflow"),
     )
-    wf = _Workflow("", spec, ctx)
+    wf = _Workflow(spec, ctx)
     for k, vv in configs:
         wf.configs[k].set(vv)
     for k, v in wf.configs.items():

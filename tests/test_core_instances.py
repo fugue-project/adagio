@@ -8,7 +8,7 @@ from adagio.instances import (NoOpCache, TaskContext, WorkflowContext,
                               _Input, _make_top_level_workflow, _Output,
                               _State, _Task, _Workflow)
 from adagio.shells.interfaceless import function_to_taskspec
-from adagio.specs import InputSpec, OutputSpec, WorkflowSpec
+from adagio.specs import InputSpec, OutputSpec, WorkflowSpec, _NodeSpec
 from pytest import raises
 from triad.exceptions import InvalidOperationError
 
@@ -335,11 +335,13 @@ def build_task(example_func, func=None, inputs=None,
                deterministic=True, task_name="taskname"):
     ts = function_to_taskspec(example_func, lambda ds: [
         d["data_type"] is str for d in ds])
+    ns = _NodeSpec(None, task_name, {}, {}, {})
+    ts._node_spec = ns
     if func is not None:
         ts.func = func
     ts.deterministic = deterministic
     wfctx = WorkflowContext(cache=cache)
-    t = _Task(task_name, ts, wfctx)
+    t = _Task(ts, wfctx)
     if inputs is not None:
         for k, v in inputs.items():
             t.inputs[k].dependency = 1  # set a dummy value so will not complaint
@@ -371,7 +373,7 @@ class SimpleSpec(WorkflowSpec):
                 if t.startswith("*"):
                     t = t[1:]
                 elif "." not in t:
-                    t = t + "." + self.nodes[t].task.outputs.get_key_by_index(0)
+                    t = t + "." + self.tasks[t].outputs.get_key_by_index(0)
                 dependency[f] = t
         self.cursor = self.add_task(name, ts, dependency=dependency)
 

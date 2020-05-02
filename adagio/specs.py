@@ -3,7 +3,8 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 
 from adagio.exceptions import DependencyDefinitionError, DependencyNotDefinedError
 from triad.collections.dict import IndexedOrderedDict, ParamDict
-from triad.utils.assertion import assert_or_throw as aot
+from triad.exceptions import InvalidOperationError
+from triad.utils.assertion import assert_or_throw as aot, assert_arg_not_none
 from triad.utils.convert import (
     as_type,
     get_full_type_path,
@@ -161,6 +162,23 @@ class TaskSpec(object):
         self.func = to_function(func)
         self.deterministic = deterministic
         self.lazy = lazy
+        self._node_spec: Optional["_NodeSpec"] = None
+
+    @property
+    def node_spec(self) -> "_NodeSpec":
+        if self._node_spec is not None:
+            return self._node_spec
+        raise InvalidOperationError(  # pragma: no cover
+            f"node_spec is not set for {self}"
+        )
+
+    @property
+    def name(self) -> str:
+        return self.node_spec.name
+
+    @property
+    def parent_workflow(self) -> "WorkflowSpec":
+        return self.node_spec.workflow
 
     def __uuid__(self) -> str:
         return to_uuid(
@@ -171,6 +189,7 @@ class TaskSpec(object):
             self.metadata,
             self.deterministic,
             self.lazy,
+            self._node_spec,
         )
 
     def to_json(self, indent: bool = False) -> str:
@@ -181,7 +200,7 @@ class TaskSpec(object):
 
     @property
     def jsondict(self) -> ParamDict:
-        return ParamDict(
+        res = ParamDict(
             dict(
                 configs=[c.jsondict for c in self.configs.values()],
                 inputs=[c.jsondict for c in self.inputs.values()],
@@ -192,6 +211,50 @@ class TaskSpec(object):
                 lazy=self.lazy,
             )
         )
+        if self._node_spec is not None:
+            res["node_spec"] = self.node_spec.jsondict
+        return res
+
+    def _validate_dependency(self):
+        if set(self.node_spec.dependency.keys()) != set(self.inputs.keys()):
+            raise DependencyNotDefinedError(
+                self.name + " input",
+                self.inputs.keys(),
+                self.node_spec.dependency.keys(),
+            )
+        for k, v in self.node_spec.dependency.items():
+            t = v.split(".", 1)
+            if len(t) == 1:
+                aot(
+                    t[0] in self.parent_workflow.inputs,
+                    f"{t[0]} is not an input of the workflow",
+                )
+                self.inputs[k].validate_spec(self.parent_workflow.inputs[t[0]])
+            else:  # len(t) == 2
+                aot(t[0] != self.name, f"{v} tries to connect to self node {self.name}")
+                task = self.parent_workflow.tasks[t[0]]
+                aot(
+                    t[1] in task.outputs, f"{t[1]} is not an output of node {task.name}"
+                )
+                self.inputs[k].validate_spec(task.outputs[t[1]])
+
+    def _validate_config(self):
+        for k, v in self.node_spec.config.items():
+            self.configs[k].validate_value(v)
+        defined = set(self.node_spec.config.keys())
+        for k, t in self.node_spec.config_dependency.items():
+            aot(k not in defined, f"can't redefine config {k} in node {self.name}")
+            defined.add(k)
+            aot(
+                t in self.parent_workflow.configs,
+                f"{t} is not a config of the workflow",
+            )
+            self.configs[k].validate_spec(self.parent_workflow.configs[t])
+        for k in set(self.configs.keys()).difference(defined):
+            aot(
+                not self.configs[k].required,
+                f"config {k} in node {self.name} is required but not defined",
+            )
 
     def _parse_spec(self, obj: Any, to_type: Type[T]) -> T:
         if isinstance(obj, to_type):
@@ -215,89 +278,6 @@ class TaskSpec(object):
         return res
 
 
-class _WorkflowSpecNode(object):
-    def __init__(
-        self,
-        workflow: "WorkflowSpec",
-        name: str,
-        task: Any,
-        dependency: Optional[Dict[str, str]],
-        config: Optional[Dict[str, Any]],
-        config_dependency: Optional[Dict[str, str]],
-    ):
-        if isinstance(task, TaskSpec):
-            _t: TaskSpec = task
-        elif isinstance(task, dict):
-            _t = TaskSpec(**task)
-        else:  # pragma: no cover
-            raise TypeError(f"{task} is not a valid TaskSpec")
-        self.workflow = workflow
-        self.name = assert_triad_var_name(name)
-        self.task = _t
-        self.dependency = dependency or {}
-        self.config = config or {}
-        self.config_dependency = config_dependency or {}
-        try:
-            self._validate_config()
-            self._validate_dependency()
-        except DependencyDefinitionError:
-            raise
-        except Exception as e:
-            raise DependencyDefinitionError(e)
-
-    def __uuid__(self) -> str:
-        return to_uuid(
-            self.name, self.task, self.dependency, self.config, self.config_dependency
-        )
-
-    @property
-    def jsondict(self) -> ParamDict:
-        return dict(
-            name=self.name,
-            task=self.task.jsondict,
-            dependency=self.dependency,
-            config=self.config,
-            config_dependency=self.config_dependency,
-        )
-
-    def _validate_dependency(self):
-        if set(self.dependency.keys()) != set(self.task.inputs.keys()):
-            raise DependencyNotDefinedError(
-                self.name + " input", self.task.inputs.keys(), self.dependency.keys()
-            )
-        for k, v in self.dependency.items():
-            t = v.split(".", 1)
-            if len(t) == 1:
-                aot(
-                    t[0] in self.workflow.inputs,
-                    f"{t[0]} is not an input of the workflow",
-                )
-                self.task.inputs[k].validate_spec(self.workflow.inputs[t[0]])
-            else:  # len(t) == 2
-                aot(t[0] != self.name, f"{v} tries to connect to self node {self.name}")
-                node = self.workflow.nodes[t[0]]
-                aot(
-                    t[1] in node.task.outputs,
-                    f"{t[1]} is not an output of node {node.name}",
-                )
-                self.task.inputs[k].validate_spec(node.task.outputs[t[1]])
-
-    def _validate_config(self):
-        for k, v in self.config.items():
-            self.task.configs[k].validate_value(v)
-        defined = set(self.config.keys())
-        for k, t in self.config_dependency.items():
-            aot(k not in defined, f"can't redefine config {k} in node {self.name}")
-            defined.add(k)
-            aot(t in self.workflow.configs, f"{t} is not a config of the workflow")
-            self.task.configs[k].validate_spec(self.workflow.configs[t])
-        for k in set(self.task.configs.keys()).difference(defined):
-            aot(
-                not self.task.configs[k].required,
-                f"config {k} in node {self.name} is required but not defined",
-            )
-
-
 class WorkflowSpec(TaskSpec):
     def __init__(
         self,
@@ -307,7 +287,7 @@ class WorkflowSpec(TaskSpec):
         metadata=None,
         deterministic: bool = True,
         lazy: bool = True,
-        nodes: Optional[List[Any]] = None,
+        tasks: Optional[List[Any]] = None,
         internal_dependency: Optional[Dict[str, str]] = None,
     ):
         super().__init__(
@@ -319,17 +299,17 @@ class WorkflowSpec(TaskSpec):
             deterministic=deterministic,
             lazy=lazy,
         )
-        self.nodes: IndexedOrderedDict[str, _WorkflowSpecNode] = {}
+        self.tasks: IndexedOrderedDict[str, TaskSpec] = {}
         self.internal_dependency: Dict[str, str] = {}
-        if nodes is not None:
-            for n in nodes:
-                self.add_task(**n)
+        if tasks is not None:
+            for t in tasks:
+                self._append_task(to_taskspec(t, self))
         if internal_dependency is not None:
             for k, v in internal_dependency.items():
                 self.link(k, v)
 
     def __uuid__(self) -> str:
-        return to_uuid(super().__uuid__(), self.nodes, self.internal_dependency)
+        return to_uuid(super().__uuid__(), self.tasks, self.internal_dependency)
 
     def add_task(
         self,
@@ -338,13 +318,11 @@ class WorkflowSpec(TaskSpec):
         dependency: Optional[Dict[str, str]] = None,
         config: Optional[Dict[str, Any]] = None,
         config_dependency: Optional[Dict[str, str]] = None,
-    ) -> _WorkflowSpecNode:
-        aot(name not in self.nodes, KeyError(f"{name} already exists in workflow"))
-        node = _WorkflowSpecNode(
-            self, name, task, dependency, config, config_dependency
-        )
-        self.nodes[name] = node
-        return node
+    ) -> TaskSpec:
+        _t = to_taskspec(task)
+        aot(_t._node_spec is None, "node_spec must not be set")
+        _t._node_spec = _NodeSpec(self, name, dependency, config, config_dependency)
+        return self._append_task(_t)
 
     def link(self, output: str, to_expr: str):
         try:
@@ -355,9 +333,9 @@ class WorkflowSpec(TaskSpec):
                 aot(t[0] in self.inputs, f"{t[0]} is not an input of the workflow")
                 self.outputs[output].validate_spec(self.inputs[t[0]])
             else:  # len(t) == 2
-                node = self.nodes[t[0]]
-                aot(t[1] in node.task.outputs, f"{t[1]} is not an output of {node}")
-                self.outputs[output].validate_spec(node.task.outputs[t[1]])
+                node = self.tasks[t[0]]
+                aot(t[1] in node.outputs, f"{t[1]} is not an output of {node}")
+                self.outputs[output].validate_spec(node.outputs[t[1]])
             self.internal_dependency[output] = to_expr
         except Exception as e:
             raise DependencyDefinitionError(e)
@@ -365,7 +343,7 @@ class WorkflowSpec(TaskSpec):
     @property
     def jsondict(self) -> ParamDict:
         d = super().jsondict
-        d["nodes"] = [x.jsondict for x in self.nodes.values()]
+        d["tasks"] = [x.jsondict for x in self.tasks.values()]
         d["internal_dependency"] = self.internal_dependency
         del d["func"]
         return d
@@ -376,14 +354,85 @@ class WorkflowSpec(TaskSpec):
                 "workflow output", self.outputs.keys(), self.internal_dependency.keys()
             )
 
+    def _append_task(self, task: TaskSpec) -> TaskSpec:
+        name = task.name
+        assert_triad_var_name(name)
+        aot(name not in self.tasks, KeyError(f"{name} already exists in workflow"))
+        aot(
+            task.parent_workflow is self,
+            InvalidOperationError(f"{task} has mismatching node_spec"),
+        )
+        try:
+            task._validate_config()
+            task._validate_dependency()
+        except DependencyDefinitionError:
+            raise
+        except Exception as e:
+            raise DependencyDefinitionError(e)
+        self.tasks[name] = task
+        return task
 
-def json_to_taskspec(json_str: str) -> TaskSpec:
-    d = json.loads(json_str)
-    if "nodes" in d:
-        return WorkflowSpec(**d)
-    else:
-        return TaskSpec(**d)
+
+def to_taskspec(
+    obj: Any, parent_workflow_spec: Optional[WorkflowSpec] = None
+) -> TaskSpec:
+    assert_arg_not_none(obj, "obj")
+    if isinstance(obj, str):
+        return to_taskspec(json.loads(obj))
+    if isinstance(obj, TaskSpec):
+        return obj
+    if isinstance(obj, Dict):
+        d: Dict[str, Any] = dict(obj)
+        node_spec: Optional[_NodeSpec] = None
+        if "node_spec" in d:
+            aot(
+                parent_workflow_spec is not None,
+                InvalidOperationError("parent workflow must be set"),
+            )
+            node_spec = _NodeSpec(
+                workflow=parent_workflow_spec, **d["node_spec"]  # type: ignore
+            )
+            del d["node_spec"]
+        if "tasks" in d:
+            ts: TaskSpec = WorkflowSpec(**d)
+        else:
+            ts = TaskSpec(**d)
+        if node_spec is not None:
+            ts._node_spec = node_spec
+        return ts
+    raise TypeError(f"can't convert {obj} to TaskSpec")  # pragma: no cover
 
 
 def _no_op(self, *args, **kwargs):  # pragma: no cover
     pass
+
+
+class _NodeSpec(object):
+    def __init__(
+        self,
+        workflow: "WorkflowSpec",
+        name: str,
+        dependency: Optional[Dict[str, str]],
+        config: Optional[Dict[str, Any]],
+        config_dependency: Optional[Dict[str, str]],
+    ):
+        self.workflow = workflow
+        self.name = name
+        self.dependency = dependency or {}
+        self.config = config or {}
+        self.config_dependency = config_dependency or {}
+
+    def __uuid__(self) -> str:
+        # self.name is not part of uuid because same uuid in spec means
+        # with the same dependency, same config, and same func, they should
+        # have the same result, and uuid is the identifier of that result
+        return to_uuid(self.dependency, self.config, self.config_dependency)
+
+    @property
+    def jsondict(self) -> ParamDict:
+        return dict(
+            name=self.name,
+            dependency=self.dependency,
+            config=self.config,
+            config_dependency=self.config_dependency,
+        )

@@ -6,7 +6,7 @@ from adagio.exceptions import (DependencyDefinitionError,
 from adagio.instances import _ConfigVar, _Input, _Output, _Task
 from adagio.shells.interfaceless import function_to_taskspec
 from adagio.specs import (ConfigSpec, InputSpec, OutputSpec, TaskSpec,
-                          WorkflowSpec, json_to_taskspec)
+                          WorkflowSpec, to_taskspec)
 from pytest import raises
 from triad.collections.dict import ParamDict
 from triad.utils.hash import to_uuid
@@ -123,7 +123,7 @@ def test_taskspec():
     ts = TaskSpec(configs, inputs, outputs, func, metadata)
     j2 = ts.to_json(False)
     assert j == j2
-    assert json_to_taskspec(j2).__uuid__() == ts.__uuid__()
+    assert to_taskspec(j2).__uuid__() == ts.__uuid__()
 
 
 def test_workflowspec():
@@ -208,7 +208,7 @@ def test_workflowspec():
     # f.add_task("f", function_to_taskspec(f1, is_config),
     #           ["input.a,ia"])
     j1 = f.to_json(False)
-    f_ = json_to_taskspec(j1)
+    f_ = to_taskspec(j1)
     j2 = f_.to_json(False)
     assert j1 == j2
     assert f.__uuid__() == f_.__uuid__()
@@ -247,8 +247,11 @@ class MockSpec(object):
 
 class MockTaskForVar(_Task):
     def __init__(self):
-        self.name = "taskname"
         self.spec = MockSpec()
+
+    @property
+    def name(self):
+        return "taskname"
 
     def __uuid__(self) -> str:
         return "id"
