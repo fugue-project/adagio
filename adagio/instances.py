@@ -25,6 +25,8 @@ from triad.exceptions import InvalidOperationError
 from triad.utils.assertion import assert_or_throw as aot
 from triad.utils.convert import to_instance
 from triad.utils.hash import to_uuid
+from six import reraise
+import sys
 
 
 class WorkflowContextMember(object):
@@ -139,6 +141,10 @@ class NaiveExecutionEngine(WorkflowExecutionEngine):
     def run_tasks(self, tasks: List["_Task"]) -> None:
         for t in tasks:
             t.run()
+            if t.state == _State.FAILED:
+                reraise(
+                    type(t._exception), t._exception, t._exec_info[2]  # type: ignore
+                )
 
 
 class WorkflowHooks(WorkflowContextMember):
@@ -470,6 +476,9 @@ class _DependencyDict(ParamDict):
         for k in self.keys():
             yield k, self[k]
 
+    def values(self) -> List[Any]:
+        return [self[k] for k in self.keys()]
+
 
 class _OutputDict(ParamDict):
     def __init__(self, data: IndexedOrderedDict[str, _Output]):
@@ -526,7 +535,7 @@ class _Task(object):
     ):
         self._lock = RLock()
         self._exception: Optional[Exception] = None
-        self._trace: Optional[StackSummary] = None
+        self._exec_info: Any = None
 
         self.parent_workflow = parent_workflow
         self.ctx = ctx
@@ -677,8 +686,8 @@ class _Task(object):
             self.state = _State.transit(self.state, new_state)
             if e is not None:
                 self._exception = e
-                self._trace = extract_stack()
-                self.log.error(f"{self} {old} -> {self.state}", e)
+                self._exec_info = sys.exc_info()
+                self.log.error(f"{self} {old} -> {self.state}  {e}")
                 self.ctx.hooks.on_task_change(self, old, self.state, e)
             else:
                 self.log.debug(f"{self} {old} -> {self.state}")
