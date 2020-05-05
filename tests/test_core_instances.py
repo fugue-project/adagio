@@ -297,6 +297,15 @@ def test_workflow_run():
         assert v == hooks.res[k]
 
 
+def test_workflow_run():
+    s = SimpleSpec()
+    s.add("a", example_helper_task0)
+    s.add("b", example_helper_task1e)
+    s.add("c", example_helper_task1)
+    ctx = WorkflowContext()
+    raises(NotImplementedError, lambda: ctx.run(s, {}))
+
+
 def t1(ctx: TaskContext):
     a = ctx.inputs.get_or_throw("a", int)
     b = ctx.configs.get_or_throw("b", str)
@@ -414,6 +423,10 @@ def example_helper_task0() -> int:
 
 def example_helper_task1(a: int) -> int:
     return a + 1
+
+
+def example_helper_task1e(a: int) -> int:
+    raise NotImplementedError
 
 
 def example_helper_task2(a: int, b: int) -> int:
