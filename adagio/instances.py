@@ -141,10 +141,7 @@ class NaiveExecutionEngine(WorkflowExecutionEngine):
     def run_tasks(self, tasks: List["_Task"]) -> None:
         for t in tasks:
             t.run()
-            if t.state == _State.FAILED:
-                reraise(
-                    type(t._exception), t._exception, t._exec_info[2]  # type: ignore
-                )
+            t.reraise()
 
 
 class WorkflowHooks(WorkflowContextMember):
@@ -640,6 +637,14 @@ class _Task(object):
             else:
                 self.outputs[k].set(v[1], from_cache=True)
         self._transit(_State.FINISHED)
+
+    def reraise(self):
+        if self.state == _State.FAILED:
+            reraise(
+                type(self._exception),
+                self._exception,
+                self._exec_info[2],  # type: ignore
+            )
 
     def _register(self, temp: List["_Task"]) -> None:
         temp.append(self)
