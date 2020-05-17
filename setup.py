@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-VERSION = "0.1.2"
+VERSION = "0.1.5"
 
 with open("README.md") as f:
     LONG_DESCRIPTION = f.read()
@@ -17,7 +17,7 @@ setup(
     author_email="goodwanghan@gmail.com",
     keywords="adagio dag directed acyclic graph",
     url="http://github.com/goodwanghan/adagio",
-    install_requires=["triad>=0.1.6"],
+    install_requires=["triad>=0.2.9"],
     extras_require={},
     classifiers=[
         # "3 - Alpha", "4 - Beta" or "5 - Production/Stable"
