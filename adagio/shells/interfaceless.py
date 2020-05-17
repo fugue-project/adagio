@@ -103,8 +103,9 @@ def _try_parse(anno: Any) -> Optional[Dict[str, Any]]:
         return dict(data_type=object, nullable=True)
     if _is_native_type(anno):
         assert_or_throw(
-            anno is not type(None), TypeError(f"{anno} NoneType is invalid")
-        )  # noqa: E721
+            anno is not type(None),  # noqa: E721
+            TypeError(f"{anno} NoneType is invalid"),
+        )
         return dict(data_type=anno, nullable=False)
     return None
 
