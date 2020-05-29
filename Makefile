@@ -17,7 +17,10 @@ dev:
 	pip3 install -r requirements.txt
 
 docs:
-	$(MAKE) -C docs html
+	rm -rf docs/api
+	rm -rf docs/build
+	sphinx-apidoc --no-toc -f -t=docs/_templates -o docs/api adagio/
+	sphinx-build -b html docs/ docs/build/
 
 lint:
 	pre-commit run --all-files

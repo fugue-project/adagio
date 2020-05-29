@@ -16,6 +16,7 @@ from typing import (
     TypeVar,
     Union,
     cast,
+    no_type_check,
 )
 from uuid import uuid4
 
@@ -30,15 +31,24 @@ from triad.utils.hash import to_uuid
 
 
 class WorkflowContextMember(object):
+    """Base class for components of func:`~adagio.instances.WorkflowContext`
+
+    :param wf_ctx: parent workflow context
+    """
+
     def __init__(self, wf_ctx: "WorkflowContext"):
         self._wf_ctx = wf_ctx
 
     @property
     def context(self) -> "WorkflowContext":
+        """parent workflow context
+        """
         return self._wf_ctx
 
     @property
     def conf(self) -> ParamDict:
+        """config of parent workflow context
+        """
         return self.context.conf
 
 
@@ -129,7 +139,7 @@ class WorkflowExecutionEngine(WorkflowContextMember, ABC):
         raise NotImplementedError
 
 
-class NaiveExecutionEngine(WorkflowExecutionEngine):
+class SequentialExecutionEngine(WorkflowExecutionEngine):
     def __init__(self, wf_ctx: "WorkflowContext"):
         super().__init__(wf_ctx)
 
@@ -162,49 +172,83 @@ WFMT = TypeVar("WFMT")
 
 
 class WorkflowContext(object):
-    def __init__(self, **config: Any):
-        self._cache = self._parse_config(
-            config.get("cache", NoOpCache), WorkflowResultCache, [self]  # type: ignore
-        )
-        self._engine = self._parse_config(
-            config.get("engine", NaiveExecutionEngine),
-            WorkflowExecutionEngine,  # type: ignore
-            [self],
-        )
-        self._hooks = self._parse_config(
-            config.get("hooks", WorkflowHooks), WorkflowHooks, [self]
-        )
-        self._logger = self._parse_config(
-            config.get("logger", logging.getLogger()), logging.Logger, []
-        )
+    """Context of the workflow instance
 
-        self._conf = ParamDict(config)
-        self._abort_requested = Event()
+    :param cache: cache type, instance or string representation,
+      defaults to NoOpCache
+    :param engine: engine type, instance or string representation,
+      defaults to SequentialExecutionEngine
+    :param hooks: hooks type, instance or string representation,
+      defaults to WorkflowHooks
+    :param logger: hooks type, instance or string representation,
+      defaults to None (logging.getLogger())
+    :param config: dict like configurations
+    """
+
+    @no_type_check
+    def __init__(
+        self,
+        cache: Any = NoOpCache,
+        engine: Any = SequentialExecutionEngine,
+        hooks: Any = WorkflowHooks,
+        logger: Any = None,
+        config: Any = None,
+    ):
+        self._cache: WorkflowResultCache = self._parse_config(
+            cache, WorkflowResultCache, [self]
+        )
+        self._engine: WorkflowExecutionEngine = self._parse_config(
+            engine, WorkflowExecutionEngine, [self]
+        )
+        self._hooks: WorkflowHooks = self._parse_config(hooks, WorkflowHooks, [self])
+        if logger is None:
+            logger = logging.getLogger()
+        self._logger: logging.Logger = self._parse_config(logger, logging.Logger, [])
+
+        self._conf: ParamDict = ParamDict(config)
+        self._abort_requested: Event = Event()
 
     @property
     def log(self) -> logging.Logger:
+        """Logger for the workflow
+        """
         return self._logger
 
     @property
     def cache(self) -> WorkflowResultCache:
+        """Cacher for the workflow
+        """
         return self._cache
 
     @property
     def conf(self) -> ParamDict:
+        """Configs for the workflow
+        """
         return self._conf
 
     @property
     def hooks(self) -> WorkflowHooks:
+        """Hooks for the workflow
+        """
         return self._hooks
 
     def abort(self) -> None:
+        """Call this function to abort a running workflow
+        """
         self._abort_requested.set()
 
     @property
     def abort_requested(self) -> bool:
+        """Abort requested
+        """
         return self._abort_requested.is_set()
 
     def run(self, spec: WorkflowSpec, conf: Dict[str, Any]) -> None:
+        """Instantiate and run a workflow spec
+
+        :param spec: workflow spec
+        :param conf: configs to initialize the workflow
+        """
         self._engine.run(spec, conf)
 
     def _parse_config(self, data: Any, tp: Type[WFMT], args: List[Any]) -> WFMT:
@@ -214,6 +258,9 @@ class WorkflowContext(object):
 
 
 class TaskContext(object):
+    """Context for a task instance
+    """
+
     def __init__(self, task: "_Task"):
         self._task = task
         self._configs = _DependencyDict(self._task.configs)
@@ -255,6 +302,12 @@ class TaskContext(object):
         return self._outputs
 
     @property
+    def workflow_context(self) -> WorkflowContext:
+        """Workflow context of the task
+        """
+        return self._task.ctx
+
+    @property
     def metadata(self) -> ParamDict:
         """Metadata of the task
         """
@@ -268,10 +321,14 @@ class TaskContext(object):
 
     @property
     def abort_requested(self) -> bool:
+        """Abort requested
+        """
         return self._task.abort_requested
 
     @property
     def log(self) -> logging.Logger:
+        """Logger for the task
+        """
         return self._task.ctx.log
 
 
