@@ -150,6 +150,7 @@ class SequentialExecutionEngine(WorkflowExecutionEngine):
 
     def run_tasks(self, tasks: List["_Task"]) -> None:
         for t in tasks:
+            t.update_by_cache()
             t.run()
             t.reraise()
 
@@ -659,7 +660,7 @@ class _Task(object):
 
     def run(self) -> None:
         with self._lock:
-            if self.state == _State.SKIPPED:
+            if self.state in [_State.SKIPPED, _State.FINISHED]:
                 return
             elif self.abort_requested:
                 self.skip()

@@ -297,13 +297,48 @@ def test_workflow_run():
         assert v == hooks.res[k]
 
 
-def test_workflow_run():
+def test_workflow_run_with_exception():
     s = SimpleSpec()
     s.add("a", example_helper_task0)
     s.add("b", example_helper_task1e)
     s.add("c", example_helper_task1)
     ctx = WorkflowContext()
     raises(NotImplementedError, lambda: ctx.run(s, {}))
+
+
+def test_workflow_run_with_cache():
+    s = SimpleSpec()
+    s.add("a", example_helper_task0)
+    s.add("c", example_helper_task1)
+    cache = MockCache()
+    hooks1 = MockHooks(None)
+    ctx = WorkflowContext(cache=cache, hooks=hooks1)
+    ctx.run(s, {})
+    assert 2 == cache.get_called
+    assert 0 == cache.hit
+    assert 2 == cache.set_called
+    expected = {"a": 10, "c": 11}
+    for k, v in expected.items():
+        assert v == hooks1.res[k]
+    # for the second run, get cache will be called, set will not
+    ctx.run(s, {})
+    assert 4 == cache.get_called
+    assert 2 == cache.hit
+    assert 2 == cache.set_called
+    expected = {"a": 10, "c": 11}
+    for k, v in expected.items():
+        assert v == hooks1.res[k]
+    # for the third run, get cache will be called, set will not
+    hooks2 = MockHooks(None)
+    ctx = WorkflowContext(cache=cache, hooks=hooks2)
+    ctx.run(s, {})
+    assert 6 == cache.get_called
+    assert 4 == cache.hit
+    assert 2 == cache.set_called
+    expected = {"a": 10, "c": 11}
+    for k, v in expected.items():
+        assert v == hooks1.res[k]
+    # TODO: skip is not tested
 
 
 def t1(ctx: TaskContext):
@@ -393,6 +428,7 @@ class MockCache(WorkflowResultCache):
         self.set_called = 0
         self.skip_called = 0
         self.get_called = 0
+        self.hit = 0
 
     def set(self, key: str, value: Any) -> None:
         self.tb[key] = (False, value)
@@ -410,6 +446,7 @@ class MockCache(WorkflowResultCache):
             return False, False, None
         x = self.tb[key]
         print("get", key)
+        self.hit += 1
         return True, x[0], x[1]
 
 
