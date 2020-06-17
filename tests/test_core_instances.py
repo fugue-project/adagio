@@ -1,12 +1,16 @@
 import threading
 import time
+from collections import OrderedDict
+from threading import RLock
+from time import sleep
 from typing import Any, Tuple
 
 from adagio.exceptions import AbortedError
-from adagio.instances import (NoOpCache, TaskContext, WorkflowContext,
-                              WorkflowHooks, WorkflowResultCache, _ConfigVar,
-                              _Input, _make_top_level_workflow, _Output,
-                              _State, _Task, _Workflow)
+from adagio.instances import (NoOpCache, ParallelExecutionEngine, TaskContext,
+                              WorkflowContext, WorkflowHooks,
+                              WorkflowResultCache, _ConfigVar, _Input,
+                              _make_top_level_workflow, _Output, _State, _Task,
+                              _Workflow)
 from adagio.shells.interfaceless import function_to_taskspec
 from adagio.specs import InputSpec, OutputSpec, WorkflowSpec, _NodeSpec
 from pytest import raises
@@ -297,6 +301,70 @@ def test_workflow_run():
         assert v == hooks.res[k]
 
 
+def test_workflow_run_parallel():
+    # simplest case
+    s = SimpleSpec()
+    s.add("a", wait_task0)
+    s.add("b", wait_task0)
+    hooks = MockHooks(None)
+    ctx = WorkflowContext(hooks=hooks)
+    ctx._engine = ParallelExecutionEngine(2, ctx)
+    ctx.run(s, {})
+    expected = {'a': 1, 'b': 1}
+    for k, v in expected.items():
+        assert v == hooks.res[k]
+    # with exception
+    s = SimpleSpec()
+    s.add("a", wait_task0)
+    s.add("b", wait_task0e)
+    hooks = MockHooks(None)
+    ctx = WorkflowContext(hooks=hooks)
+    ctx._engine = ParallelExecutionEngine(2, ctx)
+    with raises(NotImplementedError):
+        ctx.run(s, {})
+    expected = {'a': 1}
+    for k, v in expected.items():
+        assert v == hooks.res[k]
+    # on failure should cause abort
+    s = SimpleSpec()
+    s.add("a", wait_task0)
+    s.add("b", wait_task0e)
+    s.add("c", wait_task1, "a")
+    s.add("d", wait_task1, "b")
+    s.add("e", wait_task1, "d")
+    s.add("f", wait_task1, "c")
+    hooks = MockHooks(None)
+    ctx = WorkflowContext(hooks=hooks)
+    ctx._engine = ParallelExecutionEngine(2, ctx)
+    with raises(NotImplementedError):
+        ctx.run(s, {})
+    expected = {'a': 1}
+    for k, v in expected.items():
+        assert v == hooks.res[k]
+    # theoretically c is not determined
+    assert "d" in hooks.skipped
+    assert "e" in hooks.skipped
+    assert "f" in hooks.skipped
+    assert "b" in hooks.failed
+
+    # order of execution
+    s = SimpleSpec()
+    s.add("a", wait_task0)
+    s.add("b", wait_task0)
+    s.add("c", wait_task1, "a")
+    s.add("d", wait_task1, "b")
+    s.add("e", wait_task1, "d")
+    s.add("f", wait_task1, "c")
+    hooks = MockHooks(None)
+    ctx = WorkflowContext(hooks=hooks)
+    ctx._engine = ParallelExecutionEngine(2, ctx)
+    ctx.run(s, {})
+    res = list(hooks.res.keys())
+    assert {"a", "b"} == set(res[0:2])
+    assert {"c", "d"} == set(res[2:4])
+    assert {"e", "f"} == set(res[4:6])
+
+
 def test_workflow_run_with_exception():
     s = SimpleSpec()
     s.add("a", example_helper_task0)
@@ -474,10 +542,32 @@ def example_helper_task3(a: int) -> Tuple[int, int]:
     return a + 10, a - 10
 
 
+def wait_task0() -> int:
+    sleep(0.1)
+    return 1
+
+
+def wait_task0e() -> int:
+    raise NotImplementedError
+
+
+def wait_task1(a: int) -> int:
+    sleep(0.1)
+    return a + 1
+
+
+def wait_task2(a: int) -> None:
+    sleep(0.1)
+    print(a + 1)
+
+
 class MockHooks(WorkflowHooks):
     def __init__(self, wf_ctx: "WorkflowContext"):
         super().__init__(wf_ctx)
-        self.res = {}
+        self.lock = RLock()
+        self.res = OrderedDict()
+        self.skipped = set()
+        self.failed = set()
 
     def on_task_change(
         self,
@@ -487,4 +577,9 @@ class MockHooks(WorkflowHooks):
         e=None
     ):
         if new_state == _State.FINISHED and len(task.outputs) == 1:
-            self.res[task.name] = task.outputs["_0"].value
+            with self.lock:
+                self.res[task.name] = task.outputs["_0"].value
+        if new_state == _State.SKIPPED:
+            self.skipped.add(task.name)
+        if new_state == _State.FAILED:
+            self.failed.add(task.name)
