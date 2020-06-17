@@ -1,6 +1,8 @@
+import concurrent.futures as cf
 import logging
 import sys
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from enum import Enum
 from threading import Event, RLock
 from traceback import StackSummary, extract_stack
@@ -139,20 +141,63 @@ class WorkflowExecutionEngine(WorkflowContextMember, ABC):
         raise NotImplementedError
 
 
-class SequentialExecutionEngine(WorkflowExecutionEngine):
-    def __init__(self, wf_ctx: "WorkflowContext"):
+class ParallelExecutionEngine(WorkflowExecutionEngine):
+    def __init__(self, concurrency: int, wf_ctx: "WorkflowContext"):
         super().__init__(wf_ctx)
+        self._concurrency = concurrency
 
     def preprocess(self, wf: "_Workflow") -> List["_Task"]:
-        tasks: List["_Task"] = []
-        wf._register(tasks)
-        return tasks
+        temp: List["_Task"] = []
+        wf._register(temp)
+        if self._concurrency <= 1:
+            return temp
+        tempdict = {x.execution_id: x for x in temp}
+        down: Dict[str, Set[str]] = defaultdict(set)
+        up: Dict[str, Set[str]] = {}
+        q: List[str] = []
+        result: List["_Task"] = []
+        for t in temp:
+            u = set(x.execution_id for x in t.upstream)  # noqa: C401
+            c = t.execution_id
+            up[c] = u
+            for x in u:
+                down[x].add(c)
+            if len(u) == 0:
+                q.append(c)
+        while len(q) > 0:
+            key = q.pop(0)
+            result.append(tempdict[key])
+            for d in down[key]:
+                up[d].remove(key)
+                if len(up[d]) == 0:
+                    q.append(d)
+        return result
 
     def run_tasks(self, tasks: List["_Task"]) -> None:
-        for t in tasks:
-            t.update_by_cache()
-            t.run()
-            t.reraise()
+        if self._concurrency <= 1:
+            for t in tasks:
+                self.run_single(t)
+        else:
+            with cf.ThreadPoolExecutor(max_workers=self._concurrency) as e:
+                jobs = []
+                for task in tasks:
+                    jobs.append(e.submit(self.run_single, task))
+                for f in cf.as_completed(jobs):
+                    try:
+                        f.result()
+                    except Exception:
+                        self.context.abort()
+                        raise
+
+    def run_single(self, task: "_Task") -> None:
+        task.update_by_cache()
+        task.run()
+        task.reraise()
+
+
+class SequentialExecutionEngine(ParallelExecutionEngine):
+    def __init__(self, wf_ctx: "WorkflowContext"):
+        super().__init__(1, wf_ctx)
 
 
 class WorkflowHooks(WorkflowContextMember):
@@ -195,6 +240,9 @@ class WorkflowContext(object):
         logger: Any = None,
         config: Any = None,
     ):
+        self._conf: ParamDict = ParamDict(config)
+        self._abort_requested: Event = Event()
+
         self._cache: WorkflowResultCache = self._parse_config(
             cache, WorkflowResultCache, [self]
         )
@@ -205,9 +253,6 @@ class WorkflowContext(object):
         if logger is None:
             logger = logging.getLogger()
         self._logger: logging.Logger = self._parse_config(logger, logging.Logger, [])
-
-        self._conf: ParamDict = ParamDict(config)
-        self._abort_requested: Event = Event()
 
     @property
     def log(self) -> logging.Logger:
@@ -447,7 +492,9 @@ class _Input(_Dependency):
             return self._cached_value
         # the furthest dependency must be Output by definition
         assert isinstance(self.dependency, _Output)
-        if not self.dependency.value_set.wait(self.spec.timeout):
+        if not self.dependency.value_set.wait(
+            self.spec.timeout if self.spec.timeout > 0 else None
+        ):
             if self.spec.default_on_timeout and not self.spec.required:
                 return self.spec.default_value
             raise TimeoutError(
@@ -806,29 +853,6 @@ class _Workflow(_Task):
                 self.outputs[f].set_dependency(self.inputs[t[0]])
             else:
                 self.outputs[f].set_dependency(self.tasks[t[0]].outputs[t[1]])
-
-    # def _get_tasks_by_execution_order(self) -> None:
-    #     temp: List[_Task] = []
-    #     self._register(temp)
-    #     tempdict = {x.execution_id: x for x in temp}
-    #     down: Dict[str, Set[str]] = defaultdict(set)
-    #     up: Dict[str, Set[str]] = {}
-    #     q: List[str] = []
-    #     for t in temp:
-    #         u = set(x.execution_id for x in t.upstream)
-    #         c = t.execution_id
-    #         up[c] = u
-    #         for x in u:
-    #             down[x].add(c)
-    #         if len(u) == 0:
-    #             q.append(c)
-    #     while len(q) > 0:
-    #         key = q.pop(0)
-    #         self.ctx._tasks[key] = tempdict[key]
-    #         for d in down[key]:
-    #             up[d].remove(key)
-    #             if len(up[d]) == 0:
-    #                 q.append(d)
 
     def _register(self, temp: List[_Task]) -> None:
         for n in self.tasks.values():
