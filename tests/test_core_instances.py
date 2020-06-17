@@ -15,6 +15,7 @@ from adagio.shells.interfaceless import function_to_taskspec
 from adagio.specs import InputSpec, OutputSpec, WorkflowSpec, _NodeSpec
 from pytest import raises
 from triad.exceptions import InvalidOperationError
+from timeit import timeit
 
 
 def test_task_skip():
@@ -335,16 +336,18 @@ def test_workflow_run_parallel():
     s.add("f", wait_task1, "c")
     hooks = MockHooks(None)
     ctx = WorkflowContext(hooks=hooks)
-    ctx._engine = ParallelExecutionEngine(2, ctx)
-    with raises(NotImplementedError):
-        ctx.run(s, {})
+    ctx._engine = ParallelExecutionEngine(10, ctx)
+
+    def run():
+        with raises(NotImplementedError):
+            ctx.run(s, {})
+
+    t = timeit(run, number=1)
+    assert t < 0.2   # only a and b are executed
+
     expected = {'a': 1}
     for k, v in expected.items():
         assert v == hooks.res[k]
-    # theoretically c is not determined
-    assert "d" in hooks.skipped
-    assert "e" in hooks.skipped
-    assert "f" in hooks.skipped
     assert "b" in hooks.failed
 
     # order of execution
@@ -358,11 +361,10 @@ def test_workflow_run_parallel():
     hooks = MockHooks(None)
     ctx = WorkflowContext(hooks=hooks)
     ctx._engine = ParallelExecutionEngine(2, ctx)
-    ctx.run(s, {})
-    res = list(hooks.res.keys())
-    assert {"a", "b"} == set(res[0:2])
-    assert {"c", "d"} == set(res[2:4])
-    assert {"e", "f"} == set(res[4:6])
+    t = timeit(lambda: ctx.run(s, {}), number=1)
+    assert t < 0.4
+    assert 3 == hooks.res["e"]
+    assert 3 == hooks.res["f"]
 
 
 def test_workflow_run_with_exception():

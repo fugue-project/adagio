@@ -2,7 +2,6 @@ import concurrent.futures as cf
 import logging
 import sys
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from enum import Enum
 from threading import Event, RLock
 from traceback import StackSummary, extract_stack
@@ -151,48 +150,30 @@ class ParallelExecutionEngine(WorkflowExecutionEngine):
         wf._register(temp)
         if self._concurrency <= 1:
             return temp
-        tempdict = {x.execution_id: x for x in temp}
-        down: Dict[str, Set[str]] = defaultdict(set)
-        up: Dict[str, Set[str]] = {}
-        q: List[str] = []
-        result: List["_Task"] = []
-        for t in temp:
-            u = set(x.execution_id for x in t.upstream)  # noqa: C401
-            c = t.execution_id
-            up[c] = u
-            for x in u:
-                down[x].add(c)
-            if len(u) == 0:
-                q.append(c)
-        while len(q) > 0:
-            key = q.pop(0)
-            result.append(tempdict[key])
-            for d in down[key]:
-                up[d].remove(key)
-                if len(up[d]) == 0:
-                    q.append(d)
-        return result
+        return [t for t in temp if len(t.upstream) == 0]
 
     def run_tasks(self, tasks: List["_Task"]) -> None:
         if self._concurrency <= 1:
             for t in tasks:
                 self.run_single(t)
-        else:
-            with cf.ThreadPoolExecutor(max_workers=self._concurrency) as e:
-                jobs = []
-                for task in tasks:
-                    jobs.append(e.submit(self.run_single, task))
+            return
+        with cf.ThreadPoolExecutor(max_workers=self._concurrency) as e:
+            jobs = [e.submit(self.run_single, task) for task in tasks]
+            while jobs:
                 for f in cf.as_completed(jobs):
+                    jobs.remove(f)
                     try:
-                        f.result()
+                        for task in f.result().downstream:
+                            jobs.append(e.submit(self.run_single, task))
                     except Exception:
                         self.context.abort()
                         raise
 
-    def run_single(self, task: "_Task") -> None:
+    def run_single(self, task: "_Task") -> "_Task":
         task.update_by_cache()
         task.run()
         task.reraise()
+        return task
 
 
 class SequentialExecutionEngine(ParallelExecutionEngine):
