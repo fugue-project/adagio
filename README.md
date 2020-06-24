@@ -1,4 +1,4 @@
-# adagio
+# A-DAG-IO Framework
 
 [![GitHub release](https://img.shields.io/github/release/fugue-project/adagio.svg)](https://GitHub.com/fugue-project/adagio)
 [![PyPI pyversions](https://img.shields.io/pypi/pyversions/adagio.svg)](https://pypi.python.org/pypi/adagio/)
