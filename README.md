@@ -8,6 +8,8 @@
 
 [Join Fugue-Project on Slack](https://join.slack.com/t/fugue-project/shared_invite/zt-ffo2ik1d-maSsCykv_p7kXpnmIjKAug)
 
+[Join Fugue-Project on Slack](https://join.slack.com/t/fugue-project/shared_invite/zt-ffo2ik1d-maSsCykv_p7kXpnmIjKAug)
+
 A Dag IO framework for Fugue projects
 
 ## Installation
