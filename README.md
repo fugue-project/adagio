@@ -7,6 +7,8 @@
 [![Coverage Status](https://coveralls.io/repos/github/fugue-project/adagio/badge.svg)](https://coveralls.io/github/fugue-project/adagio)
 [![Doc](https://readthedocs.org/projects/adag-io/badge)](https://adag-io.readthedocs.org)
 
+[Join Fugue-Project on Slack](https://join.slack.com/t/fugue-project/shared_invite/zt-ffo2ik1d-maSsCykv_p7kXpnmIjKAug)
+
 A Dag IO framework for Fugue projects
 
 ## Installation
