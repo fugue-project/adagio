@@ -15,4 +15,3 @@ A Dag IO framework for Fugue projects
 ```
 pip install adagio
 ```
-
