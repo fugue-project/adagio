@@ -1,4 +1,4 @@
-from adagio import __version__
+from adagio_version import __version__
 from setuptools import find_packages, setup
 
 with open("README.md") as f:
@@ -16,7 +16,7 @@ setup(
     author_email="goodwanghan@gmail.com",
     keywords="adagio dag directed acyclic graph workflow",
     url="http://github.com/fugue-project/adagio",
-    install_requires=["triad>=0.3.8"],
+    install_requires=["triad>=0.4.0"],
     extras_require={},
     classifiers=[
         # "3 - Alpha", "4 - Beta" or "5 - Production/Stable"
