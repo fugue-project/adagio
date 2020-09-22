@@ -42,14 +42,12 @@ class WorkflowContextMember(object):
 
     @property
     def context(self) -> "WorkflowContext":
-        """parent workflow context
-        """
+        """parent workflow context"""
         return self._wf_ctx
 
     @property
     def conf(self) -> ParamDict:
-        """config of parent workflow context
-        """
+        """config of parent workflow context"""
         return self.context.conf
 
 
@@ -92,8 +90,7 @@ class WorkflowResultCache(WorkflowContextMember, ABC):
 
 
 class NoOpCache(WorkflowResultCache):
-    """Dummy WorkflowResultCache doing nothing
-    """
+    """Dummy WorkflowResultCache doing nothing"""
 
     def __init__(self, wf_ctx: "WorkflowContext"):
         super().__init__(wf_ctx)
@@ -237,37 +234,31 @@ class WorkflowContext(object):
 
     @property
     def log(self) -> logging.Logger:
-        """Logger for the workflow
-        """
+        """Logger for the workflow"""
         return self._logger
 
     @property
     def cache(self) -> WorkflowResultCache:
-        """Cacher for the workflow
-        """
+        """Cacher for the workflow"""
         return self._cache
 
     @property
     def conf(self) -> ParamDict:
-        """Configs for the workflow
-        """
+        """Configs for the workflow"""
         return self._conf
 
     @property
     def hooks(self) -> WorkflowHooks:
-        """Hooks for the workflow
-        """
+        """Hooks for the workflow"""
         return self._hooks
 
     def abort(self) -> None:
-        """Call this function to abort a running workflow
-        """
+        """Call this function to abort a running workflow"""
         self._abort_requested.set()
 
     @property
     def abort_requested(self) -> bool:
-        """Abort requested
-        """
+        """Abort requested"""
         return self._abort_requested.is_set()
 
     def run(self, spec: WorkflowSpec, conf: Dict[str, Any]) -> None:
@@ -285,8 +276,7 @@ class WorkflowContext(object):
 
 
 class TaskContext(object):
-    """Context for a task instance
-    """
+    """Context for a task instance"""
 
     def __init__(self, task: "_Task"):
         self._task = task
@@ -330,32 +320,27 @@ class TaskContext(object):
 
     @property
     def workflow_context(self) -> WorkflowContext:
-        """Workflow context of the task
-        """
+        """Workflow context of the task"""
         return self._task.ctx
 
     @property
     def metadata(self) -> ParamDict:
-        """Metadata of the task
-        """
+        """Metadata of the task"""
         return self.spec.metadata
 
     @property
     def spec(self) -> TaskSpec:
-        """Spec of the task
-        """
+        """Spec of the task"""
         return self._task.spec
 
     @property
     def abort_requested(self) -> bool:
-        """Abort requested
-        """
+        """Abort requested"""
         return self._task.abort_requested
 
     @property
     def log(self) -> logging.Logger:
-        """Logger for the task
-        """
+        """Logger for the task"""
         return self._task.ctx.log
 
 
@@ -853,7 +838,7 @@ def _make_top_level_workflow(
         InvalidOperationError("Can't have inputs for top level workflow"),
     )
     wf = _Workflow(spec, ctx)
-    for k, vv in configs:
+    for k, vv in configs.items():
         wf.configs[k].set(vv)
     for k, v in wf.configs.items():
         try:
