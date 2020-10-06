@@ -272,7 +272,7 @@ class WorkflowContext(object):
     def _parse_config(self, data: Any, tp: Type[WFMT], args: List[Any]) -> WFMT:
         if isinstance(data, tp):
             return data
-        return cast(WFMT, to_instance(data, tp, args=args))
+        return cast(WFMT, to_instance(data, expected_base_type=tp, args=args))
 
 
 class TaskContext(object):
