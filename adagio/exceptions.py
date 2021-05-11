@@ -2,23 +2,19 @@ from typing import Iterable
 
 
 class AdagioError(Exception):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    pass
 
 
 class WorkflowBug(AdagioError):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    pass
 
 
 class CompileError(AdagioError):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    pass
 
 
 class DependencyDefinitionError(CompileError):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    pass
 
 
 class DependencyNotDefinedError(DependencyDefinitionError):
@@ -28,8 +24,7 @@ class DependencyNotDefinedError(DependencyDefinitionError):
 
 
 class WorkflowRuntimeError(AdagioError):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    pass
 
 
 class AbortedError(WorkflowRuntimeError):
@@ -38,10 +33,4 @@ class AbortedError(WorkflowRuntimeError):
 
 
 class SkippedError(WorkflowRuntimeError):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-def assert_on_compile(bool_expr: bool, msg: str) -> None:
-    if not bool_expr:
-        raise CompileError(msg)
+    pass
