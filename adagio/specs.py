@@ -34,21 +34,21 @@ class OutputSpec(object):
         if obj is not None:
             aot(
                 isinstance(obj, self.data_type),
-                TypeError(f"{obj} mismatches type {self.paramdict}"),
+                lambda: TypeError(f"{obj} mismatches type {self.paramdict}"),
             )
             return obj
-        aot(self.nullable, f"Can't set None to {self}")
+        aot(self.nullable, lambda: f"Can't set None to {self}")
         return obj
 
     def validate_spec(self, spec: "OutputSpec") -> "OutputSpec":
         if not self.nullable:
             aot(
                 not spec.nullable,
-                TypeError(f"{self} - {spec} are not compatible on nullable"),
+                lambda: TypeError(f"{self} - {spec} are not compatible on nullable"),
             )
         aot(
             issubclass(spec.data_type, self.data_type),
-            TypeError(f"{self} - {spec} are not compatible on data_type"),
+            lambda: TypeError(f"{self} - {spec} are not compatible on data_type"),
         )
         return spec
 
@@ -93,7 +93,7 @@ class ConfigSpec(OutputSpec):
     def validate_value(self, obj: Any) -> Any:
         if obj is not None:
             return super().validate_value(obj)
-        aot(self.nullable, f"Can't set None to {self.paramdict}")
+        aot(self.nullable, lambda: f"Can't set None to {self.paramdict}")
         return obj
 
     @property
@@ -227,14 +227,18 @@ class TaskSpec(object):
             if len(t) == 1:
                 aot(
                     t[0] in self.parent_workflow.inputs,
-                    f"{t[0]} is not an input of the workflow",
+                    lambda: f"{t[0]} is not an input of the workflow",
                 )
                 self.inputs[k].validate_spec(self.parent_workflow.inputs[t[0]])
             else:  # len(t) == 2
-                aot(t[0] != self.name, f"{v} tries to connect to self node {self.name}")
+                aot(
+                    t[0] != self.name,
+                    lambda: f"{v} tries to connect to self node {self.name}",
+                )
                 task = self.parent_workflow.tasks[t[0]]
                 aot(
-                    t[1] in task.outputs, f"{t[1]} is not an output of node {task.name}"
+                    t[1] in task.outputs,
+                    lambda: f"{t[1]} is not an output of node {task.name}",
                 )
                 self.inputs[k].validate_spec(task.outputs[t[1]])
 
@@ -243,17 +247,20 @@ class TaskSpec(object):
             self.configs[k].validate_value(v)
         defined = set(self.node_spec.config.keys())
         for k, t in self.node_spec.config_dependency.items():
-            aot(k not in defined, f"can't redefine config {k} in node {self.name}")
+            aot(
+                k not in defined,
+                lambda: f"can't redefine config {k} in node {self.name}",
+            )
             defined.add(k)
             aot(
                 t in self.parent_workflow.configs,
-                f"{t} is not a config of the workflow",
+                lambda: f"{t} is not a config of the workflow",
             )
             self.configs[k].validate_spec(self.parent_workflow.configs[t])
         for k in set(self.configs.keys()).difference(defined):
             aot(
                 not self.configs[k].required,
-                f"config {k} in node {self.name} is required but not defined",
+                lambda: f"config {k} in node {self.name} is required but not defined",
             )
 
     def _parse_spec(self, obj: Any, to_type: Type[T]) -> T:
@@ -261,7 +268,7 @@ class TaskSpec(object):
             return obj
         if isinstance(obj, str):
             obj = json.loads(obj)
-        aot(isinstance(obj, dict), f"{obj} is not dict")
+        aot(isinstance(obj, dict), lambda: f"{obj} is not dict")
         return to_type(**obj)
 
     def _parse_spec_collection(
@@ -326,15 +333,24 @@ class WorkflowSpec(TaskSpec):
 
     def link(self, output: str, to_expr: str):
         try:
-            aot(output in self.outputs, f"{output} is not an output of the workflow")
-            aot(output not in self.internal_dependency, f"{output} is already defined")
+            aot(
+                output in self.outputs,
+                lambda: f"{output} is not an output of the workflow",
+            )
+            aot(
+                output not in self.internal_dependency,
+                lambda: f"{output} is already defined",
+            )
             t = to_expr.split(".", 1)
             if len(t) == 1:
-                aot(t[0] in self.inputs, f"{t[0]} is not an input of the workflow")
+                aot(
+                    t[0] in self.inputs,
+                    lambda: f"{t[0]} is not an input of the workflow",
+                )
                 self.outputs[output].validate_spec(self.inputs[t[0]])
             else:  # len(t) == 2
                 node = self.tasks[t[0]]
-                aot(t[1] in node.outputs, f"{t[1]} is not an output of {node}")
+                aot(t[1] in node.outputs, lambda: f"{t[1]} is not an output of {node}")
                 self.outputs[output].validate_spec(node.outputs[t[1]])
             self.internal_dependency[output] = to_expr
         except Exception as e:
@@ -357,10 +373,13 @@ class WorkflowSpec(TaskSpec):
     def _append_task(self, task: TaskSpec) -> TaskSpec:
         name = task.name
         assert_triad_var_name(name)
-        aot(name not in self.tasks, KeyError(f"{name} already exists in workflow"))
+        aot(
+            name not in self.tasks,
+            lambda: KeyError(f"{name} already exists in workflow"),
+        )
         aot(
             task.parent_workflow is self,
-            InvalidOperationError(f"{task} has mismatching node_spec"),
+            lambda: InvalidOperationError(f"{task} has mismatching node_spec"),
         )
         try:
             task._validate_config()
@@ -387,7 +406,7 @@ def to_taskspec(
         if "node_spec" in d:
             aot(
                 parent_workflow_spec is not None,
-                InvalidOperationError("parent workflow must be set"),
+                lambda: InvalidOperationError("parent workflow must be set"),
             )
             node_spec = _NodeSpec(
                 workflow=parent_workflow_spec, **d["node_spec"]  # type: ignore

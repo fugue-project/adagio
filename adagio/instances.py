@@ -434,7 +434,7 @@ class _Output(_Dependency):
     def validate_dependency(self, other: "_Dependency") -> None:
         aot(
             isinstance(other, (_Input, _Output)),
-            TypeError(f"{other} is not Input or Output"),
+            lambda: TypeError(f"{other} is not Input or Output"),
         )
         self.spec.validate_spec(other.spec)  # type:ignore
 
@@ -478,7 +478,7 @@ class _Input(_Dependency):
     def validate_dependency(self, other: "_Dependency") -> None:
         aot(
             isinstance(other, (_Input, _Output)),
-            TypeError(f"{other} is not Input or Output"),
+            lambda: TypeError(f"{other} is not Input or Output"),
         )
         self.spec.validate_spec(other.spec)  # type:ignore
 
@@ -518,14 +518,14 @@ class _ConfigVar(_Dependency):
         if self.dependency is not None:
             return self.dependency.get()  # type:ignore
         if not self.is_set:
-            aot(not self.spec.required, f"{self} is required but not set")
+            aot(not self.spec.required, lambda: f"{self} is required but not set")
             return self.spec.default_value
         return self.value
 
     def validate_dependency(self, other: "_Dependency") -> None:
         aot(
             isinstance(other, (_ConfigVar)),
-            TypeError(f"{other} is not Input or Output"),
+            lambda: TypeError(f"{other} is not Input or Output"),
         )
         self.spec.validate_spec(other.spec)  # type:ignore
 
@@ -732,7 +732,7 @@ class _Task(object):
         for k, vv in self.inputs.items():
             aot(
                 vv.dependency is not None,
-                WorkflowBug(f"BUG: input {k}'s dependency is not set"),
+                lambda: WorkflowBug(f"BUG: input {k}'s dependency is not set"),
             )
 
     def _make_dict(
