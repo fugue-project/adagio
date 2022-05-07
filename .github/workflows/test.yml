@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.6, 3.7, 3.8]
+        python-version: [3.6, 3.7, 3.8, 3.9, "3.10"]
 
     steps:
     - uses: actions/checkout@v2
@@ -26,9 +26,8 @@ jobs:
       run: make devenv
     - name: Test
       run: make test
-    - name: Coveralls
-      env:
-        COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
-      run: |
-        pip install coveralls
-        coveralls
+    - name: "Upload coverage to Codecov"
+      if: matrix.python-version == 3.8
+      uses: codecov/codecov-action@v1
+      with:
+        fail_ci_if_error: true
