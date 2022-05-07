@@ -23,7 +23,7 @@ from uuid import uuid4
 
 from adagio.exceptions import AbortedError, SkippedError, WorkflowBug
 from adagio.specs import ConfigSpec, InputSpec, OutputSpec, TaskSpec, WorkflowSpec
-from six import reraise
+from six import reraise  # type: ignore
 from triad.collections.dict import IndexedOrderedDict, ParamDict
 from triad.exceptions import InvalidOperationError
 from triad.utils.assertion import assert_or_throw as aot

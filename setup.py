@@ -16,7 +16,7 @@ setup(
     author_email="goodwanghan@gmail.com",
     keywords="adagio dag directed acyclic graph workflow",
     url="http://github.com/fugue-project/adagio",
-    install_requires=["triad>=0.5.3"],
+    install_requires=["triad>=0.6.1"],
     extras_require={},
     classifiers=[
         # "3 - Alpha", "4 - Beta" or "5 - Production/Stable"
@@ -28,6 +28,8 @@ setup(
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3 :: Only",
     ],
     python_requires=">=3.6",
