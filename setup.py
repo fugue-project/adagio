@@ -7,7 +7,7 @@ with open("README.md") as f:
 setup(
     name="adagio",
     version=__version__,
-    packages=find_packages(),
+    packages=find_packages(exclude=('tests', )),
     description="The Dag IO Framework for Fugue projects",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
